@@ -27,7 +27,7 @@
 | Task | Status | Notes |
 | --- | --- | --- |
 | T02 — Canonical type vocabulary in domain/types.rs | `[x]` | |
-| T03 — Port trait definitions in domain/ports.rs | `[ ]` | |
+| T03 — Port trait definitions in domain/ports.rs | `[x]` | |
 
 ---
 
@@ -223,3 +223,8 @@
 - T02: `ureq 3` has no `tls` feature; `rustls` is on by default — use `ureq = "3"` with no extra features.
 - T02: `lopdf 0.40` removed the `nom_parser` feature (nom is the default parser) — do not specify it.
 - T02: `sha2 0.11` requires `digest 0.11`; `hmac 0.13` is still rc — keep the entire RustCrypto digest-0.10 family in sync (`sha2 = "0.10"`, `hmac = "0.12"`, `aes-gcm = "0.10"`, `argon2 = "0.5"`).
+- T03: `thiserror` was missing from `Cargo.toml` — always check that every `use` in domain/ has a corresponding dep entry.
+- T03: `AmnesiaPipeline::embed_in_memory` must use `&mut dyn Read` / `&mut dyn Write` (not `impl Trait`) to remain object-safe.
+- T03: Port traits referencing `Box<dyn Fn(...)>` in signatures break object safety — use `&dyn Fn(...)` instead.
+- T03: `CameraProfile` belongs in `ports.rs` (not `types.rs`) because it is adapter-facing configuration, not a domain value.
+- T03: Object-safety is best verified with a single test that calls `fn assert_object_safe<T: ?Sized>()` for every trait — compile-time check with zero runtime cost.
