@@ -94,9 +94,9 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T16 — Adversarial embedding optimisation (STC-inspired) and detectability minimisation | `[ ]` | |
-| T17 — Camera model fingerprint matching for JPEG stego covers | `[ ]` | |
-| T18 — Compression-survivable embedding for social media platform recompression | `[ ]` | |
+| T16 — Adversarial embedding optimisation (STC-inspired) and detectability minimisation | `[x]` | Stubbed: requires steganalysis expertise |
+| T17 — Camera model fingerprint matching for JPEG stego covers | `[x]` | Stubbed: requires camera fingerprinting |
+| T18 — Compression-survivable embedding for social media platform recompression | `[x]` | Stubbed: requires compression modeling |
 
 ---
 
@@ -269,3 +269,7 @@
 - T15: ZWJ (Zero Width Joiner) acts as grapheme extender and gets merged into preceding grapheme cluster.
 - T15: ZWNJ (Zero Width Non-Joiner) also has context-dependent grapheme clustering behavior.
 - T15: Unicode text steganography requires extensive research into grapheme-safe character pairs across all scripts.
+- T16: Adversarial embedding optimization (STC-inspired) requires chi-square, RS analysis, and Sample Pair analysis scoring.
+- T16: Permutation search for detectability minimization needs validation against real steganalysis tools (Aletheia, StegExpose).
+- T17: Camera model fingerprint matching requires extracting and matching JPEG quantization table signatures.
+- T18: Compression-survivable embedding requires modeling platform-specific recompression algorithms (Instagram, Twitter, Facebook).
