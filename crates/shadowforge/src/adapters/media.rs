@@ -20,7 +20,13 @@ const KEY_FORMAT: &str = "format";
 const KEY_SAMPLE_RATE: &str = "sample_rate";
 const KEY_CHANNELS: &str = "channels";
 const KEY_BITS_PER_SAMPLE: &str = "bits_per_sample";
+
+// TODO(T13): Extract GIF palette for palette stego
+#[expect(dead_code, reason = "will be used in T13 for palette stego")]
 const KEY_PALETTE: &str = "palette";
+
+// TODO(T16): Extract JPEG quant tables for adaptive embedding
+#[expect(dead_code, reason = "will be used in T16 for adaptive embedding")]
 const KEY_QUANT_TABLES: &str = "quant_tables";
 
 /// Image media loader for PNG/BMP/JPEG/GIF.
@@ -145,7 +151,7 @@ impl MediaLoader for ImageMediaLoader {
 /// Audio media loader for WAV files.
 ///
 /// Loads WAV audio to raw i16 LE sample data stored in `CoverMedia.data`.
-/// Metadata includes sample_rate, channels, and bits_per_sample.
+/// Metadata includes `sample_rate`, `channels`, and `bits_per_sample`.
 #[derive(Debug, Default)]
 pub struct AudioMediaLoader;
 
