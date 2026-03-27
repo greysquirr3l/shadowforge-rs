@@ -32,6 +32,9 @@ hmac    = "0.12"
 sha2    = "0.10"
 subtle  = { version = "2.6", default-features = false }
 
+# Error handling
+thiserror = "2"
+
 # Secure memory
 zeroize = { version = "1.8", features = ["derive", "alloc"] }
 
