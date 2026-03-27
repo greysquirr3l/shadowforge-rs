@@ -82,7 +82,7 @@
 | --- | --- | --- |
 | T11 — LSB image steganography (PNG/BMP) | `[x]` | |
 | T12 — DCT-based JPEG steganography | `[x]` | Stubbed: requires pure-Rust DCT coefficient access |
-| T13 — Palette-based steganography (GIF/PNG indexed) | `[ ]` | |
+| T13 — Palette-based steganography (GIF/PNG indexed) | `[x]` | Stubbed: requires palette extraction |
 | T14 — LSB audio, phase encoding (DSSS), and echo hiding (WAV) | `[ ]` | |
 | T15 — Zero-width character text steganography with full Unicode/grapheme safety | `[ ]` | |
 
@@ -257,3 +257,6 @@
 - T12: DCT JPEG steganography requires access to DCT coefficients — no pure-Rust library provides this without unsafe code.
 - T12: `jpeg-decoder` and `image` crate decode JPEGs to pixels only, not DCT coefficients.
 - T12: Stubbing unimplemented features with clear error messages and TODO comments is acceptable for iterative development.
+- T13: Palette steganography requires palette extraction from indexed color images — `image` crate converts to RGBA8, losing palette data.
+- T13: GIF and indexed PNG have different palette structures, requiring format-specific handling.
+- T13: Use backticks around code references in doc comments (`metadata["palette"]`) to avoid clippy::doc_link_with_quotes warnings.
