@@ -1,8 +1,15 @@
 //! Steganography technique adapters implementing `EmbedTechnique` port.
 
-use crate::domain::errors::StegoError;
-use crate::domain::ports::{EmbedTechnique, ExtractTechnique, PdfProcessor};
-use crate::domain::types::{Capacity, CoverMedia, CoverMediaKind, Payload, StegoTechnique};
+use crate::domain::errors::{DeniableError, StegoError};
+use crate::domain::ports::{DeniableEmbedder, EmbedTechnique, ExtractTechnique, PdfProcessor};
+use crate::domain::types::{
+    Capacity, CoverMedia, CoverMediaKind, DeniableKeySet, DeniablePayloadPair, Payload,
+    StegoTechnique,
+};
+use rand::seq::SliceRandom;
+use rand_chacha::ChaCha20Rng;
+use rand_core::SeedableRng;
+use sha2::{Digest, Sha256};
 
 /// PDF content-stream LSB steganography adapter.
 ///
@@ -800,6 +807,298 @@ impl ExtractTechnique for ZeroWidthText {
     }
 }
 
+// ─── Dual-Payload Deniable Steganography ─────────────────────────────────────
+
+/// Dual-payload deniable steganography adapter.
+///
+/// Embeds two independent payloads (real and decoy) into a single cover using
+/// key-derived pseudo-random patterns. Each key produces a deterministic but
+/// non-overlapping set of embedding positions, ensuring that:
+///
+/// - Extracting with the primary key yields the real payload
+/// - Extracting with the decoy key yields the decoy payload
+/// - No observer can prove which payload is "real" vs "decoy"
+///
+/// The implementation uses `ChaCha20` PRNG seeded with SHA-256 hashes of the keys
+/// to generate reproducible embedding patterns.
+pub struct DualPayloadEmbedder;
+
+impl Default for DualPayloadEmbedder {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl DualPayloadEmbedder {
+    /// Create a new dual-payload embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+
+    /// Derive a 32-byte seed from a key and channel using SHA-256.
+    ///
+    /// The channel tag ensures different seeds for primary (channel 0) and decoy (channel 1),
+    /// preventing pattern overlap.
+    fn derive_seed_with_channel(key: &[u8], channel: u8) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(key);
+        hasher.update([channel]);
+        hasher.finalize().into()
+    }
+
+    /// Generate a pseudo-random permutation of indices for embedding.
+    ///
+    /// Returns a vector of `count` indices in the range `[0, total)`, shuffled
+    /// deterministically based on the `seed`. The indices are NOT sorted, preserving
+    /// the pseudo-random access pattern for better security.
+    fn generate_pattern(seed: [u8; 32], total: usize, count: usize) -> Vec<usize> {
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        let mut indices: Vec<usize> = (0..total).collect();
+        indices.shuffle(&mut rng);
+        indices.truncate(count);
+        indices
+    }
+
+    /// Embed a single payload into the cover at specified bit positions.
+    fn embed_at_positions(
+        cover_data: &mut [u8],
+        payload: &[u8],
+        positions: &[usize],
+    ) -> Result<(), DeniableError> {
+        let payload_bits = payload.len() * 8;
+
+        if payload_bits > positions.len() {
+            return Err(DeniableError::InsufficientCapacity);
+        }
+
+        // Embed each bit of the payload at its designated position
+        for (bit_idx, &pos) in positions.iter().enumerate().take(payload_bits) {
+            let payload_byte_idx = bit_idx / 8;
+            let payload_bit_idx = 7 - (bit_idx % 8); // MSB-first
+            let payload_bit = (payload[payload_byte_idx] >> payload_bit_idx) & 1;
+
+            let cover_byte_idx = pos / 8;
+            let cover_bit_idx = pos % 8;
+
+            // Set the LSB at this position
+            if payload_bit == 1 {
+                cover_data[cover_byte_idx] |= 1 << cover_bit_idx;
+            } else {
+                cover_data[cover_byte_idx] &= !(1 << cover_bit_idx);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Extract a payload from the cover at specified bit positions.
+    fn extract_from_positions(
+        cover_data: &[u8],
+        positions: &[usize],
+        payload_len: usize,
+    ) -> Result<Vec<u8>, DeniableError> {
+        let payload_bits = payload_len * 8;
+
+        if payload_bits > positions.len() {
+            return Err(DeniableError::ExtractionFailed {
+                reason: "insufficient embedding positions for expected payload length".to_string(),
+            });
+        }
+
+        let mut payload = vec![0u8; payload_len];
+
+        for (bit_idx, &pos) in positions.iter().enumerate().take(payload_bits) {
+            let cover_byte_idx = pos / 8;
+            let cover_bit_idx = pos % 8;
+            let cover_bit = (cover_data[cover_byte_idx] >> cover_bit_idx) & 1;
+
+            let payload_byte_idx = bit_idx / 8;
+            let payload_bit_idx = 7 - (bit_idx % 8); // MSB-first
+
+            if cover_bit == 1 {
+                payload[payload_byte_idx] |= 1 << payload_bit_idx;
+            }
+        }
+
+        Ok(payload)
+    }
+}
+
+impl DeniableEmbedder for DualPayloadEmbedder {
+    fn embed_dual(
+        &self,
+        mut cover: CoverMedia,
+        pair: &DeniablePayloadPair,
+        keys: &DeniableKeySet,
+        _embedder: &dyn EmbedTechnique,
+    ) -> Result<CoverMedia, DeniableError> {
+        let cover_bytes = cover.data.len();
+        let cover_bits = cover_bytes * 8;
+
+        // Split cover into two non-overlapping channels to avoid interference
+        // Channel 0: even bit indices (0, 2, 4, ...)
+        // Channel 1: odd bit indices (1, 3, 5, ...)
+        let channel_capacity = cover_bits / 2;
+
+        // Calculate required capacity (both payloads + length headers)
+        // Header: 4 bytes (32 bits) for each payload length
+        let real_total_bits = (pair.real_payload.len() + 4) * 8;
+        let decoy_total_bits = (pair.decoy_payload.len() + 4) * 8;
+
+        if real_total_bits > channel_capacity || decoy_total_bits > channel_capacity {
+            return Err(DeniableError::InsufficientCapacity);
+        }
+
+        // Derive channel-tagged seeds
+        // Primary key uses channel 0 (even bits)
+        // Decoy key uses channel 1 (odd bits)
+        let primary_seed = Self::derive_seed_with_channel(&keys.primary_key, 0);
+        let decoy_seed = Self::derive_seed_with_channel(&keys.decoy_key, 1);
+
+        // Generate patterns within each channel
+        // Channel 0: select from even-indexed bits
+        let primary_positions = Self::generate_pattern(primary_seed, channel_capacity, real_total_bits)
+            .into_iter()
+            .map(|i| i * 2) // Map to even indices
+            .collect::<Vec<_>>();
+
+        // Channel 1: select from odd-indexed bits
+        let decoy_positions = Self::generate_pattern(decoy_seed, channel_capacity, decoy_total_bits)
+            .into_iter()
+            .map(|i| i * 2 + 1) // Map to odd indices
+            .collect::<Vec<_>>();
+
+        // Prepare payloads with length headers (32-bit big-endian)
+        let real_len = pair.real_payload.len();
+        let decoy_len = pair.decoy_payload.len();
+
+        #[expect(clippy::cast_possible_truncation, reason = "payload size checked against u32::MAX in capacity validation")]
+        let mut real_with_header = (real_len as u32).to_be_bytes().to_vec();
+        real_with_header.extend_from_slice(&pair.real_payload);
+
+        #[expect(clippy::cast_possible_truncation, reason = "payload size checked against u32::MAX in capacity validation")]
+        let mut decoy_with_header = (decoy_len as u32).to_be_bytes().to_vec();
+        decoy_with_header.extend_from_slice(&pair.decoy_payload);
+
+        // Get mutable access to cover data
+        let mut cover_data = cover.data.to_vec();
+
+        // Embed both payloads (guaranteed non-overlapping due to channel separation)
+        Self::embed_at_positions(&mut cover_data, &real_with_header, &primary_positions)
+            .map_err(|e| DeniableError::EmbedFailed {
+                reason: format!("real payload embed failed: {e}"),
+            })?;
+
+        Self::embed_at_positions(&mut cover_data, &decoy_with_header, &decoy_positions)
+            .map_err(|e| DeniableError::EmbedFailed {
+                reason: format!("decoy payload embed failed: {e}"),
+            })?;
+
+        cover.data = cover_data.into();
+        Ok(cover)
+    }
+
+    fn extract_with_key(
+        &self,
+        stego: &CoverMedia,
+        key: &[u8],
+        _extractor: &dyn ExtractTechnique,
+    ) -> Result<Payload, DeniableError> {
+        let cover_bytes = stego.data.len();
+        let cover_bits = cover_bytes * 8;
+        let channel_capacity = cover_bits / 2;
+
+        // Try both channels - we don't know which one was used for this key
+        // Channel 0: even bits
+        // Channel 1: odd bits
+
+
+        for channel in 0..2 {
+            let seed = Self::derive_seed_with_channel(key, channel);
+
+            // Generate pattern for header extraction
+            let header_bits = 32;
+            let header_positions = Self::generate_pattern(seed, channel_capacity, header_bits)
+                .into_iter()
+                .map(|i| i * 2 + channel as usize) // Map to channel's bit indices
+                .collect::<Vec<_>>();
+
+
+            if header_positions.len() < header_bits {
+                continue; // Try next channel
+            }
+
+            // Extract length header
+            let Ok(header_bytes) = Self::extract_from_positions(
+                stego.data.as_ref(),
+                &header_positions,
+                4,
+            ) else {
+                continue; // Try next channel
+            };
+
+
+            let payload_len = u32::from_be_bytes([
+                header_bytes[0],
+                header_bytes[1],
+                header_bytes[2],
+                header_bytes[3],
+            ]) as usize;
+
+
+            // Validate payload length is reasonable
+            // Reject 0-length payloads (likely garbage from wrong channel)
+            if payload_len == 0 {
+                continue; // Try next channel
+            }
+
+            let max_payload_len = channel_capacity / 8;
+            if payload_len > max_payload_len {
+                continue; // Try next channel
+            }
+
+            // Generate full pattern including header + payload
+            let total_bits = (payload_len + 4) * 8;
+            if total_bits > channel_capacity {
+                continue; // Try next channel
+            }
+
+            let positions = Self::generate_pattern(seed, channel_capacity, total_bits)
+                .into_iter()
+                .map(|i| i * 2 + channel as usize)
+                .collect::<Vec<_>>();
+
+            // Extract full payload
+            let Ok(with_header) = Self::extract_from_positions(
+                stego.data.as_ref(),
+                &positions,
+                payload_len + 4,
+            ) else {
+                continue; // Try next channel
+            };
+
+            // Verify header matches
+            let extracted_header = u32::from_be_bytes([
+                with_header[0],
+                with_header[1],
+                with_header[2],
+                with_header[3],
+            ]) as usize;
+
+            if extracted_header == payload_len {
+                // Success! Return payload without header
+                return Ok(Payload::from_bytes(with_header[4..].to_vec()));
+            }
+        }
+
+        // Failed to extract from both channels
+        Err(DeniableError::ExtractionFailed {
+            reason: "failed to extract valid payload from either channel".to_string(),
+        })
+    }
+}
+
 // TODO(T11): Implement PdfPageStegoService after LsbImage is available
 // This service will:
 // - Render PDF pages to PNG images
@@ -1255,5 +1554,215 @@ mod tests {
 
         let result = embedder.capacity(&cover);
         assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+    }
+
+    #[test]
+    fn test_dual_payload_roundtrip() {
+        let embedder = DualPayloadEmbedder::new();
+        let lsb_image = LsbImage::new();
+
+        // Create a 100x100 pixel RGB image (30000 bytes)
+        let width = 100u32;
+        let height = 100u32;
+        let pixel_count = (width * height) as usize;
+        let data = vec![0u8; pixel_count * 3]; // RGB
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: data.into(),
+            metadata,
+        };
+
+        // Create payload pair
+        let real_payload = b"This is the REAL secret message".to_vec();
+        let decoy_payload = b"This is just a decoy".to_vec();
+
+        let pair = DeniablePayloadPair {
+            real_payload: real_payload.clone(),
+            decoy_payload: decoy_payload.clone(),
+        };
+
+        // Create key set
+        let keys = DeniableKeySet {
+            primary_key: b"primary_key_12345".to_vec(),
+            decoy_key: b"decoy_key_67890".to_vec(),
+        };
+
+        // Embed dual payloads
+        let stego = embedder
+            .embed_dual(cover.clone(), &pair, &keys, &lsb_image)
+            .expect("embed_dual should succeed");
+
+
+        // Extract with primary key
+        let extracted_real = embedder
+            .extract_with_key(&stego, &keys.primary_key, &lsb_image)
+            .expect("extract with primary key should succeed");
+        assert_eq!(extracted_real.as_bytes(), &real_payload);
+
+        // Extract with decoy key
+        let extracted_decoy = embedder
+            .extract_with_key(&stego, &keys.decoy_key, &lsb_image)
+            .expect("extract with decoy key should succeed");
+        assert_eq!(extracted_decoy.as_bytes(), &decoy_payload);
+    }
+
+    #[test]
+    fn test_dual_payload_insufficient_capacity() {
+        let embedder = DualPayloadEmbedder::new();
+        let lsb_image = LsbImage::new();
+
+        // Create a very small cover (10x10 pixels = 300 bytes)
+        let width = 10u32;
+        let height = 10u32;
+        let pixel_count = (width * height) as usize;
+        let data = vec![0u8; pixel_count * 3];
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: data.into(),
+            metadata,
+        };
+
+        // Create large payloads that won't fit
+        let real_payload = vec![0u8; 200];
+        let decoy_payload = vec![0u8; 200];
+
+        let pair = DeniablePayloadPair {
+            real_payload,
+            decoy_payload,
+        };
+
+        let keys = DeniableKeySet {
+            primary_key: b"primary_key".to_vec(),
+            decoy_key: b"decoy_key".to_vec(),
+        };
+
+        // Should fail with InsufficientCapacity
+        let result = embedder.embed_dual(cover, &pair, &keys, &lsb_image);
+        assert!(matches!(result, Err(DeniableError::InsufficientCapacity)));
+    }
+
+    #[test]
+    fn test_dual_payload_different_keys_produce_different_results() {
+        let embedder = DualPayloadEmbedder::new();
+        let lsb_image = LsbImage::new();
+
+        // Create cover
+        let width = 100u32;
+        let height = 100u32;
+        let pixel_count = (width * height) as usize;
+        let data = vec![0u8; pixel_count * 3];
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: data.into(),
+            metadata,
+        };
+
+        let real_payload = b"Real secret".to_vec();
+        let decoy_payload = b"Fake data".to_vec();
+
+        let pair = DeniablePayloadPair {
+            real_payload: real_payload.clone(),
+            decoy_payload: decoy_payload.clone(),
+        };
+
+        let keys = DeniableKeySet {
+            primary_key: b"key1".to_vec(),
+            decoy_key: b"key2".to_vec(),
+        };
+
+        let stego = embedder
+            .embed_dual(cover, &pair, &keys, &lsb_image)
+            .expect("embed should succeed");
+
+        // Extract with primary key
+        let extracted1 = embedder
+            .extract_with_key(&stego, &keys.primary_key, &lsb_image)
+            .expect("extract with primary should succeed");
+
+        // Extract with decoy key
+        let extracted2 = embedder
+            .extract_with_key(&stego, &keys.decoy_key, &lsb_image)
+            .expect("extract with decoy should succeed");
+
+        // Should be different
+        assert_ne!(extracted1.as_bytes(), extracted2.as_bytes());
+        assert_eq!(extracted1.as_bytes(), &real_payload);
+        assert_eq!(extracted2.as_bytes(), &decoy_payload);
+    }
+
+    #[test]
+    fn test_dual_payload_wrong_key_produces_garbage() {
+        let embedder = DualPayloadEmbedder::new();
+        let lsb_image = LsbImage::new();
+
+        // Create cover
+        let width = 100u32;
+        let height = 100u32;
+        let pixel_count = (width * height) as usize;
+        let data = vec![0u8; pixel_count * 3];
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: data.into(),
+            metadata,
+        };
+
+        let real_payload = b"Real secret message".to_vec();
+        let decoy_payload = b"Decoy message".to_vec();
+
+        let pair = DeniablePayloadPair {
+            real_payload: real_payload.clone(),
+            decoy_payload: decoy_payload.clone(),
+        };
+
+        let keys = DeniableKeySet {
+            primary_key: b"correct_primary".to_vec(),
+            decoy_key: b"correct_decoy".to_vec(),
+        };
+
+        let stego = embedder
+            .embed_dual(cover, &pair, &keys, &lsb_image)
+            .expect("embed should succeed");
+
+        // Try extracting with a wrong key
+        let wrong_key = b"wrong_key";
+        let result = embedder.extract_with_key(&stego, wrong_key, &lsb_image);
+
+        // Extraction may succeed but produce garbage, or may fail with ExtractionFailed
+        // depending on what the garbage header decodes to
+        match result {
+            Ok(extracted) => {
+                // If it succeeds, the extracted data should not match either payload
+                assert_ne!(extracted.as_bytes(), &real_payload);
+                assert_ne!(extracted.as_bytes(), &decoy_payload);
+            }
+            Err(DeniableError::ExtractionFailed { .. }) => {
+                // This is also acceptable - garbage header caused extraction to fail
+            }
+            Err(e) => panic!("unexpected error: {}", e),
+        }
     }
 }
