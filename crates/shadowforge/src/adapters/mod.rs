@@ -3,3 +3,6 @@
 pub mod correction;
 pub mod crypto;
 pub mod media;
+
+#[cfg(feature = "pdf")]
+pub mod pdf;

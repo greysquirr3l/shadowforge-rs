@@ -68,7 +68,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T08 — PDF load/save and page-render-to-image pipeline | `[ ]` | |
+| T08 — PDF load/save and page-render-to-image pipeline | `[x]` | |
 | T09 — PDF-native stego: content-stream LSB and XMP metadata watermarking | `[ ]` | |
 | T10 — PDF render-stego-rebuild pipeline and distribution integration | `[ ]` | |
 
@@ -236,3 +236,7 @@
 - T06: Use `.flatten()` on iterators of `Option` to avoid manual `if let Some` patterns (clippy::manual_flatten).
 - T06: CorrectionError::HmacMismatch uses field name `index` not `shard_index`.
 - T07: MediaError::IoError only has a `reason` field (not `path` or `source`) — use `MediaError::IoError { reason: e.to_string() }`.
+- T08: lopdf has `new_object_id()` not `new_page_id()` — use `new_object_id()` to reserve object IDs before referencing them.
+- T08: `dictionary!` macro must be imported explicitly — add `use lopdf::dictionary;`.
+- T08: pdfium-render requires system library installation — mark tests with `#[ignore = "requires pdfium system library"]` when unavailable.
+- T08: In edition 2024, `ref mut` on already-borrowed mutable references is redundant — use `if let Object::Dictionary(dict) = pages_dict` when `pages_dict` is `&mut _`.

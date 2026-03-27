@@ -219,6 +219,9 @@ pub enum PdfError {
         /// Human-readable description of the IO problem.
         reason: String,
     },
+    /// The PDF document is encrypted and cannot be processed.
+    #[error("PDF is encrypted and cannot be processed")]
+    Encrypted,
 }
 
 // ─── DistributionError ────────────────────────────────────────────────────────
