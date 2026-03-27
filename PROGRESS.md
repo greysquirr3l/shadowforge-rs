@@ -37,7 +37,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T04 — ML-KEM-1024 and ML-DSA-87 implementations | `[ ]` | |
+| T04 — ML-KEM-1024 and ML-DSA-87 implementations | `[x]` | |
 | T05 — AES-256-GCM symmetric cipher, Argon2id KDF, and full pipeline helpers | `[ ]` | |
 
 ---
@@ -228,3 +228,5 @@
 - T03: Port traits referencing `Box<dyn Fn(...)>` in signatures break object safety — use `&dyn Fn(...)` instead.
 - T03: `CameraProfile` belongs in `ports.rs` (not `types.rs`) because it is adapter-facing configuration, not a domain value.
 - T03: Object-safety is best verified with a single test that calls `fn assert_object_safe<T: ?Sized>()` for every trait — compile-time check with zero runtime cost.
+- T04: `rand_core 0.10` does NOT have `from_entropy()` or `from_os_rng()` — use `ChaCha20Rng::from_rng(&mut rand::rng())` to seed from OS entropy.
+- T04: `bytes::Bytes` is immutable and cannot be mutated or zeroized — for tests, remove zeroize calls or convert to `Vec<u8>` first.
