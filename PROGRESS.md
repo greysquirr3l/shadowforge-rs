@@ -83,7 +83,7 @@
 | T11 — LSB image steganography (PNG/BMP) | `[x]` | |
 | T12 — DCT-based JPEG steganography | `[x]` | Stubbed: requires pure-Rust DCT coefficient access |
 | T13 — Palette-based steganography (GIF/PNG indexed) | `[x]` | Stubbed: requires palette extraction |
-| T14 — LSB audio, phase encoding (DSSS), and echo hiding (WAV) | `[ ]` | |
+| T14 — LSB audio, phase encoding (DSSS), and echo hiding (WAV) | `[x]` | LsbAudio complete; PhaseEncoding/EchoHiding stubbed |
 | T15 — Zero-width character text steganography with full Unicode/grapheme safety | `[ ]` | |
 
 ---
@@ -260,3 +260,7 @@
 - T13: Palette steganography requires palette extraction from indexed color images — `image` crate converts to RGBA8, losing palette data.
 - T13: GIF and indexed PNG have different palette structures, requiring format-specific handling.
 - T13: Use backticks around code references in doc comments (`metadata["palette"]`) to avoid clippy::doc_link_with_quotes warnings.
+- T14: LSB audio steganography operates on i16 sample LSBs, similar to LSB image but on audio samples.
+- T14: Audio capacity: (sample_count - 32) / 8 bytes, where 32 samples store the payload length header.
+- T14: Phase encoding (DSSS) requires FFT/IFFT operations — no suitable pure-Rust audio DSP library available.
+- T14: Echo hiding requires echo synthesis and autocorrelation — complex DSP operations beyond basic LSB.
