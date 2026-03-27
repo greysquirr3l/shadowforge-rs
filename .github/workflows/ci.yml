@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install pdfium (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz | tar xz
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$(pwd)/lib" >> $GITHUB_ENV
+
+      - name: Install pdfium (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz | tar xz
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$(pwd)/lib" >> $GITHUB_ENV
+
+      - name: Build
+        run: cargo build --workspace --all-features
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-features
+
+      - name: Rustfmt check
+        run: cargo fmt --all -- --check
+
+  deny:
+    name: Supply Chain (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Install pdfium
+        run: |
+          curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz | tar xz
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$(pwd)/lib" >> $GITHUB_ENV
+
+      - name: Run coverage
+        run: |
+          cargo tarpaulin --workspace --all-features \
+            --out Xml --output-dir coverage/ \
+            --exclude-files "src/interface/*" \
+            --timeout 300
+
+      - name: Check coverage thresholds
+        run: |
+          python3 scripts/check_coverage.py coverage/cobertura.xml \
+            --overall 85 \
+            --module "domain::crypto" 90
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/cobertura.xml

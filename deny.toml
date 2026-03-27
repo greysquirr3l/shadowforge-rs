@@ -1,0 +1,62 @@
+# cargo-deny configuration
+# Run: cargo deny check
+# CI: cargo deny check --hide-inclusion-graph
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "aarch64-pc-windows-msvc" },
+]
+
+# ─── Advisories ───────────────────────────────────────────────────────────────
+[advisories]
+version      = 2
+db-path      = "~/.cargo/advisory-db"
+db-urls      = ["https://github.com/rustsec/advisory-db"]
+ignore       = []
+unmaintained = "warn"
+
+# ─── Licenses ─────────────────────────────────────────────────────────────────
+[licenses]
+version              = 2
+allow                = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "OpenSSL",
+    "Zlib",
+]
+deny                 = []
+confidence-threshold = 0.8
+exceptions           = []
+
+# ─── Bans ─────────────────────────────────────────────────────────────────────
+[bans]
+multiple-versions = "warn"
+wildcards         = "allow"
+deny = [
+    { name = "native-tls",  reason = "Use rustls. Native TLS introduces system library variance." },
+    { name = "openssl-sys", reason = "Use rustls or ring. OpenSSL is a large C attack surface." },
+    { name = "async-std",   reason = "This crate is tokio-free; async-std should not appear." },
+    { name = "pqcrypto",    reason = "Use ml-kem and ml-dsa (pure Rust NIST finalists)." },
+    { name = "oqs",         reason = "Use ml-kem and ml-dsa (pure Rust NIST finalists)." },
+    { name = "lazy_static", reason = "Use std::sync::LazyLock (stable since 1.80)." },
+    { name = "rand", wrappers = [], version = "<0.8" },
+]
+skip      = []
+skip-tree = []
+
+# ─── Sources ──────────────────────────────────────────────────────────────────
+[sources]
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-registry   = ["https://github.com/rust-lang/crates.io-index"]
+allow-git        = []

@@ -1,0 +1,7 @@
+/target/
+Cargo.lock
+*.key
+*.stego
+shadowforge-rs-seed.tar.gz
+shadowforge-rs/
+coverage/
