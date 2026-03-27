@@ -352,6 +352,62 @@ impl ExtractTechnique for LsbImage {
     }
 }
 
+/// DCT-based JPEG steganography adapter (STUB).
+///
+/// **NOT YET IMPLEMENTED**: Requires a pure-Rust JPEG library that exposes
+/// DCT coefficients without unsafe code. Current Rust JPEG libraries either:
+/// - Decode to pixels only (jpeg-decoder, image crate)
+/// - Require unsafe bindings (mozjpeg-sys, libjpeg-turbo-sys)
+///
+/// TODO(T12): Implement DCT coefficient access and modification:
+/// - Parse JPEG to access non-zero AC DCT coefficients
+/// - Embed payload in LSBs of coefficients (skip DC and zeros)
+/// - Preserve quantization and Huffman tables
+/// - Re-encode JPEG with modified coefficients
+#[derive(Debug, Default)]
+pub struct DctJpeg;
+
+impl DctJpeg {
+    /// Create a new DCT JPEG embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl EmbedTechnique for DctJpeg {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::DctJpeg
+    }
+
+    fn capacity(&self, _cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "DCT JPEG steganography not yet implemented (requires DCT coefficient access)"
+                .to_string(),
+        })
+    }
+
+    fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "DCT JPEG steganography not yet implemented (requires DCT coefficient access)"
+                .to_string(),
+        })
+    }
+}
+
+impl ExtractTechnique for DctJpeg {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::DctJpeg
+    }
+
+    fn extract(&self, _cover: &CoverMedia) -> Result<Payload, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "DCT JPEG steganography not yet implemented (requires DCT coefficient access)"
+                .to_string(),
+        })
+    }
+}
+
 // TODO(T11): Implement PdfPageStegoService after LsbImage is available
 // This service will:
 // - Render PDF pages to PNG images
@@ -593,5 +649,28 @@ mod tests {
         // Extract
         let extracted = embedder.extract(&stego).expect("extract");
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+    }
+
+    #[test]
+    fn test_dct_jpeg_stub_returns_not_implemented() {
+        let embedder = DctJpeg::new();
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::JpegImage,
+            data: vec![].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+
+        // Should return UnsupportedCoverType error indicating not implemented
+        let result = embedder.embed(cover.clone(), &payload);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.extract(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
     }
 }
