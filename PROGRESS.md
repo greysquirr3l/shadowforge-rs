@@ -48,7 +48,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T06 — Reed-Solomon K-of-N erasure coding with HMAC-tagged shards | `[ ]` | |
+| T06 — Reed-Solomon K-of-N erasure coding with HMAC-tagged shards | `[x]` | |
 
 ---
 
@@ -233,3 +233,5 @@
 - T05: Argon2id requires `PasswordHasher` trait to be in scope to use `hash_password()` method.
 - T05: `Payload` is a newtype `Payload(Vec<u8>)` — use `from_bytes()` to construct and `as_bytes()` to access data.
 - T05: Use `#[expect(clippy::cast_possible_truncation, reason = "...")]` for intentional casts with documented bounds.
+- T06: Use `.flatten()` on iterators of `Option` to avoid manual `if let Some` patterns (clippy::manual_flatten).
+- T06: CorrectionError::HmacMismatch uses field name `index` not `shard_index`.

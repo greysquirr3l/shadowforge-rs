@@ -1,3 +1,4 @@
 //! Infrastructure adapters implementing domain port traits.
 
+pub mod correction;
 pub mod crypto;
