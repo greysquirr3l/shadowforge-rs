@@ -128,6 +128,8 @@ pub enum StegoTechnique {
     PdfMetadata,
     /// Zero-modification corpus cover selection via ANN search.
     CorpusSelection,
+    /// Dual-payload deniable steganography with decoy and real payloads.
+    DualPayload,
 }
 
 // ─── Platform / Chroma profiles ───────────────────────────────────────────────
