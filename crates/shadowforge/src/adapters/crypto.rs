@@ -1,4 +1,4 @@
-//! Cryptographic adapters — ML-KEM-1024 and ML-DSA-87.
+//! Cryptographic adapters — ML-KEM-1024, ML-DSA-87, and AES-256-GCM.
 //!
 //! Each struct implements the corresponding port trait from
 //! [`crate::domain::ports`] and wires in a `ChaCha20Rng` seeded from the OS
@@ -9,11 +9,11 @@ use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 
 use crate::domain::crypto::{
-    decapsulate_kem, encapsulate_kem, generate_dsa_keypair, generate_kem_keypair, sign_dsa,
-    verify_dsa,
+    decapsulate_kem, decrypt_aes_gcm, encapsulate_kem, encrypt_aes_gcm, generate_dsa_keypair,
+    generate_kem_keypair, sign_dsa, verify_dsa,
 };
 use crate::domain::errors::CryptoError;
-use crate::domain::ports::{Encryptor, Signer};
+use crate::domain::ports::{Encryptor, Signer, SymmetricCipher};
 use crate::domain::types::{KeyPair, Signature};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────────────────────────
@@ -75,6 +75,24 @@ impl Signer for MlDsaSigner {
     }
 }
 
+// ─── Aes256GcmCipher ──────────────────────────────────────────────────────────
+
+/// AES-256-GCM symmetric cipher adapter.
+///
+/// Implements the [`SymmetricCipher`] port using the `aes-gcm` crate.
+#[derive(Debug, Default)]
+pub struct Aes256GcmCipher;
+
+impl SymmetricCipher for Aes256GcmCipher {
+    fn encrypt(&self, key: &[u8], nonce: &[u8], plaintext: &[u8]) -> Result<Bytes, CryptoError> {
+        encrypt_aes_gcm(key, nonce, plaintext)
+    }
+
+    fn decrypt(&self, key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Bytes, CryptoError> {
+        decrypt_aes_gcm(key, nonce, ciphertext)
+    }
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -109,5 +127,28 @@ mod tests {
             .verify(&kp.public_key, b"tampered", &sig)
             .expect("verify");
         assert!(!ok, "sig over original must not verify against tampered msg");
+    }
+
+    #[test]
+    fn test_symmetric_adapter_roundtrip() {
+        let cipher = Aes256GcmCipher;
+        let key = vec![0u8; 32];
+        let nonce = vec![1u8; 12];
+        let plaintext = b"test message";
+        let ciphertext = cipher.encrypt(&key, &nonce, plaintext).expect("encrypt");
+        let recovered = cipher.decrypt(&key, &nonce, &ciphertext).expect("decrypt");
+        assert_eq!(recovered.as_ref(), plaintext);
+    }
+
+    #[test]
+    fn test_symmetric_adapter_tamper() {
+        let cipher = Aes256GcmCipher;
+        let key = vec![0u8; 32];
+        let nonce = vec![1u8; 12];
+        let plaintext = b"test message";
+        let mut ciphertext = cipher.encrypt(&key, &nonce, plaintext).expect("encrypt").to_vec();
+        ciphertext[0] ^= 0xFF;
+        let result = cipher.decrypt(&key, &nonce, &ciphertext);
+        assert!(result.is_err(), "tampered ciphertext must fail to decrypt");
     }
 }

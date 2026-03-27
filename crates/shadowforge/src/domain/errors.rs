@@ -66,6 +66,14 @@ pub enum CryptoError {
         /// Actual key length provided.
         got: usize,
     },
+    /// Nonce was the wrong length.
+    #[error("invalid nonce length: expected {expected} bytes, got {got}")]
+    InvalidNonceLength {
+        /// Expected nonce length in bytes.
+        expected: usize,
+        /// Actual nonce length provided.
+        got: usize,
+    },
 }
 
 // ─── CorrectionError ──────────────────────────────────────────────────────────
