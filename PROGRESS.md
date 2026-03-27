@@ -26,7 +26,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T02 — Canonical type vocabulary in domain/types.rs | `[ ]` | |
+| T02 — Canonical type vocabulary in domain/types.rs | `[x]` | |
 | T03 — Port trait definitions in domain/ports.rs | `[ ]` | |
 
 ---
@@ -213,4 +213,13 @@
 > The orchestrator reads this section at the start of every iteration
 > to avoid repeating past mistakes.
 
-_No learnings yet._
+- T02: `RUSTFLAGS=-D warnings` in shell promotes `missing_docs = "warn"` to a hard error — every public variant, field, and method needs a doc comment.
+- T02: Compact single-line enum variant syntax (`OneToMany { x: u8 }`) cannot hold per-field doc comments — always expand to multi-line form.
+- T02: `bytes::Bytes` needs `features = ["serde"]` for `Serialize`/`Deserialize`.
+- T02: `Uuid` from the `uuid` crate does NOT implement `Zeroize` — use manual `impl Zeroize + Drop + Clone` when a struct containing `Uuid` needs zeroization.
+- T02: `ml-kem` and `ml-dsa` parameter sets are Rust types, not Cargo features — never add feature flags for them.
+- T02: `bincode 3.0.0` is intentionally uncompilable (ships a `compile_error!`) — keep `bincode = "1"`.
+- T02: `vergen 9` moved git support to companion crates (`vergen-gitcl`, `vergen-git2`) that only have beta releases — keep vergen at `"8"` with `features = ["git", "gitcl"]`.
+- T02: `ureq 3` has no `tls` feature; `rustls` is on by default — use `ureq = "3"` with no extra features.
+- T02: `lopdf 0.40` removed the `nom_parser` feature (nom is the default parser) — do not specify it.
+- T02: `sha2 0.11` requires `digest 0.11`; `hmac 0.13` is still rc — keep the entire RustCrypto digest-0.10 family in sync (`sha2 = "0.10"`, `hmac = "0.12"`, `aes-gcm = "0.10"`, `argon2 = "0.5"`).
