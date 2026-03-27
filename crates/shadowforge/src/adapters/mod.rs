@@ -2,3 +2,4 @@
 
 pub mod correction;
 pub mod crypto;
+pub mod media;

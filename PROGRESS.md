@@ -58,7 +58,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T07 — Image and audio codec adapters | `[ ]` | |
+| T07 — Image and audio codec adapters | `[x]` | |
 
 ---
 
@@ -235,3 +235,4 @@
 - T05: Use `#[expect(clippy::cast_possible_truncation, reason = "...")]` for intentional casts with documented bounds.
 - T06: Use `.flatten()` on iterators of `Option` to avoid manual `if let Some` patterns (clippy::manual_flatten).
 - T06: CorrectionError::HmacMismatch uses field name `index` not `shard_index`.
+- T07: MediaError::IoError only has a `reason` field (not `path` or `source`) — use `MediaError::IoError { reason: e.to_string() }`.
