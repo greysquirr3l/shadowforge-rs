@@ -1,0 +1,20 @@
+[workspace]
+members  = ["crates/*"]
+resolver = "2"
+
+# ─── Workspace-wide profiles ──────────────────────────────────────────────────
+
+[profile.release]
+opt-level     = 3
+lto           = "fat"
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"
+
+[profile.release-with-debug]
+inherits = "release"
+strip    = false
+debug    = true
+
+[profile.dev]
+opt-level = 1 # slightly optimised dev builds for crypto perf

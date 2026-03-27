@@ -1,0 +1,216 @@
+# shadowforge-rs — Implementation Progress
+
+> Orchestrator reads this file at the start of each loop iteration.
+> Subagents update this file after completing a task.
+
+## Status Legend
+
+- `[ ]` — Not started
+- `[~]` — In progress (claimed by a subagent)
+- `[x]` — Completed
+- `[!]` — Blocked / needs human input
+
+---
+
+## Phase 1 — Workspace Scaffold
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T01 — Workspace skeleton, toolchain pin, CI, and lint config | `[x]` | |
+
+---
+
+## Phase 2 — Shared Domain Types
+
+> Depends on: Phase 1 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T02 — Canonical type vocabulary in domain/types.rs | `[ ]` | |
+| T03 — Port trait definitions in domain/ports.rs | `[ ]` | |
+
+---
+
+## Phase 3 — Crypto Bounded Context
+
+> Depends on: Phase 2 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T04 — ML-KEM-1024 and ML-DSA-87 implementations | `[ ]` | |
+| T05 — AES-256-GCM symmetric cipher, Argon2id KDF, and full pipeline helpers | `[ ]` | |
+
+---
+
+## Phase 4 — Error Correction Bounded Context
+
+> Depends on: Phase 3 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T06 — Reed-Solomon K-of-N erasure coding with HMAC-tagged shards | `[ ]` | |
+
+---
+
+## Phase 5 — Media Bounded Context
+
+> Depends on: Phase 4 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T07 — Image and audio codec adapters | `[ ]` | |
+
+---
+
+## Phase 6 — PDF Bounded Context
+
+> Depends on: Phase 5 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T08 — PDF load/save and page-render-to-image pipeline | `[ ]` | |
+| T09 — PDF-native stego: content-stream LSB and XMP metadata watermarking | `[ ]` | |
+| T10 — PDF render-stego-rebuild pipeline and distribution integration | `[ ]` | |
+
+---
+
+## Phase 7 — Steganography Bounded Context
+
+> Depends on: Phase 6 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T11 — LSB image steganography (PNG/BMP) | `[ ]` | |
+| T12 — DCT-based JPEG steganography | `[ ]` | |
+| T13 — Palette-based steganography (GIF/PNG indexed) | `[ ]` | |
+| T14 — LSB audio, phase encoding (DSSS), and echo hiding (WAV) | `[ ]` | |
+| T15 — Zero-width character text steganography with full Unicode/grapheme safety | `[ ]` | |
+
+---
+
+## Phase 8 — Adaptive Embedding Bounded Context
+
+> Depends on: Phase 7 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T16 — Adversarial embedding optimisation (STC-inspired) and detectability minimisation | `[ ]` | |
+| T17 — Camera model fingerprint matching for JPEG stego covers | `[ ]` | |
+| T18 — Compression-survivable embedding for social media platform recompression | `[ ]` | |
+
+---
+
+## Phase 9 — Deniable Steganography and Panic Wipe
+
+> Depends on: Phase 8 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T19 — Dual-payload deniable steganography | `[ ]` | |
+| T20 — Panic wipe: emergency secure erasure of all key material | `[ ]` | |
+
+---
+
+## Phase 10 — Canary Shards and Dead Drop Mode
+
+> Depends on: Phase 9 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T21 — Canary shard tripwires for K-of-N distribution compromise detection | `[ ]` | |
+| T22 — Dead drop mode: platform-aware cover generation for public posting | `[ ]` | |
+
+---
+
+## Phase 11 — Time-Lock Payloads and Stylometric Scrubbing
+
+> Depends on: Phase 10 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T23 — Time-lock puzzle payloads using Rivest iterated hash chains | `[ ]` | |
+| T24 — Linguistic stylometric fingerprint scrubbing | `[ ]` | |
+
+---
+
+## Phase 12 — Corpus Steganography
+
+> Depends on: Phase 11 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T25 — Zero-modification corpus steganography via ANN cover selection | `[ ]` | |
+
+---
+
+## Phase 13 — Operational Security Context
+
+> Depends on: Phase 12 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T26 — Amnesiac mode: zero-disk-write in-memory pipeline via std::io::pipe | `[ ]` | |
+| T27 — Geographic threshold distribution manifests | `[ ]` | |
+| T28 — Forensic watermark tripwires for distribution leak identification | `[ ]` | |
+
+---
+
+## Phase 14 — Distribution and Reconstruction
+
+> Depends on: Phase 13 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T29 — Four distribution patterns: 1:1, 1:N, N:1, N:M — with canary and geographic support | `[ ]` | |
+| T30 — K-of-N shard reconstruction with full verification chain | `[ ]` | |
+
+---
+
+## Phase 15 — Analysis and Archive
+
+> Depends on: Phase 14 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T31 — Capacity estimation and chi-square detectability analysis across all techniques | `[ ]` | |
+| T32 — ZIP and TAR/TAR.GZ archive handling with nested archive support | `[ ]` | |
+
+---
+
+## Phase 16 — Application Layer
+
+> Depends on: Phase 15 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T33 — Use-case orchestrators for all services including nation-state countermeasures | `[ ]` | |
+
+---
+
+## Phase 17 — CLI Interface
+
+> Depends on: Phase 16 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T34 — Full clap CLI: Go surface + all nation-state countermeasure commands | `[ ]` | |
+
+---
+
+## Phase 18 — Documentation and Release Hygiene
+
+> Depends on: Phase 17 all complete
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| T35 — README, ARCHITECTURE.md, THREAT_MODEL.md, Makefile, and release workflow | `[ ]` | |
+
+---
+
+## Accumulated Learnings
+
+> Subagents append discoveries here after each task.
+> The orchestrator reads this section at the start of every iteration
+> to avoid repeating past mistakes.
+
+_No learnings yet._

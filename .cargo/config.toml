@@ -1,0 +1,4 @@
+[cargo]
+# MSRV-aware resolver: fall back rather than hard error on incompatible deps
+[resolver]
+incompatible-rust-versions = "fallback"
