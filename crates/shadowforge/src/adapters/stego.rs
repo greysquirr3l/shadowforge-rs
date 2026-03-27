@@ -408,6 +408,62 @@ impl ExtractTechnique for DctJpeg {
     }
 }
 
+/// Palette-based steganography adapter for GIF/PNG indexed images (STUB).
+///
+/// **NOT YET IMPLEMENTED**: Requires palette extraction from indexed color images.
+/// The `image` crate converts all images to RGBA8, losing original palette data.
+///
+/// TODO(T13): Implement palette steganography:
+/// - Extract palette data from GIF/PNG indexed color images
+/// - Store palette as bytes in `CoverMedia.metadata["palette"]`
+/// - Embed payload in LSBs of palette R/G/B bytes
+/// - Capacity: (`palette_size` * 3) / 8 bytes
+/// - Re-encode image with modified palette (pixel indices unchanged)
+/// - Requires format-specific handling (GIF vs indexed PNG)
+#[derive(Debug, Default)]
+pub struct PaletteStego;
+
+impl PaletteStego {
+    /// Create a new palette steganography embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl EmbedTechnique for PaletteStego {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::Palette
+    }
+
+    fn capacity(&self, _cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Palette steganography not yet implemented (requires palette extraction)"
+                .to_string(),
+        })
+    }
+
+    fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Palette steganography not yet implemented (requires palette extraction)"
+                .to_string(),
+        })
+    }
+}
+
+impl ExtractTechnique for PaletteStego {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::Palette
+    }
+
+    fn extract(&self, _cover: &CoverMedia) -> Result<Payload, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Palette steganography not yet implemented (requires palette extraction)"
+                .to_string(),
+        })
+    }
+}
+
 // TODO(T11): Implement PdfPageStegoService after LsbImage is available
 // This service will:
 // - Render PDF pages to PNG images
@@ -657,6 +713,29 @@ mod tests {
 
         let cover = CoverMedia {
             kind: CoverMediaKind::JpegImage,
+            data: vec![].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+
+        // Should return UnsupportedCoverType error indicating not implemented
+        let result = embedder.embed(cover.clone(), &payload);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.extract(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+    }
+
+    #[test]
+    fn test_palette_stego_stub_returns_not_implemented() {
+        let embedder = PaletteStego::new();
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::GifImage,
             data: vec![].into(),
             metadata: std::collections::HashMap::new(),
         };
