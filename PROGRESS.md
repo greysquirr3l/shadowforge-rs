@@ -69,7 +69,7 @@
 | Task | Status | Notes |
 | --- | --- | --- |
 | T08 — PDF load/save and page-render-to-image pipeline | `[x]` | |
-| T09 — PDF-native stego: content-stream LSB and XMP metadata watermarking | `[ ]` | |
+| T09 — PDF-native stego: content-stream LSB and XMP metadata watermarking | `[x]` | |
 | T10 — PDF render-stego-rebuild pipeline and distribution integration | `[ ]` | |
 
 ---
@@ -240,3 +240,7 @@
 - T08: `dictionary!` macro must be imported explicitly — add `use lopdf::dictionary;`.
 - T08: pdfium-render requires system library installation — mark tests with `#[ignore = "requires pdfium system library"]` when unavailable.
 - T08: In edition 2024, `ref mut` on already-borrowed mutable references is redundant — use `if let Object::Dictionary(dict) = pages_dict` when `pages_dict` is `&mut _`.
+- T09: PDF content-stream LSB capacity is limited by the number of numeric tokens — ensure test payloads fit available capacity.
+- T09: XMP metadata can be embedded in custom namespaces (`sf:HiddenData`) in PDF /Metadata streams.
+- T09: `base64` crate encoding uses `base64::engine::general_purpose::STANDARD.encode()` and `.decode()`.
+- T09: Use `doc.catalog_mut()` for mutable catalog access to add /Metadata reference.

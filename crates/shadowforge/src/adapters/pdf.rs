@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::io::BufWriter;
 use std::path::Path;
 
+use base64::engine::general_purpose;
+use base64::Engine;
 use bytes::Bytes;
 use image::{DynamicImage, ImageFormat};
 use lopdf::{dictionary, Document, Object};
@@ -302,32 +304,260 @@ impl PdfProcessor for PdfProcessorImpl {
         })
     }
 
-    // TODO(T09): Implement content-stream LSB embedding
     fn embed_in_content_stream(
         &self,
-        _pdf: CoverMedia,
-        _payload: &Payload,
+        pdf: CoverMedia,
+        payload: &Payload,
     ) -> Result<CoverMedia, PdfError> {
-        unimplemented!("T09: PDF content-stream embedding not yet implemented")
+        // Load PDF from bytes
+        let mut doc = Document::load_from(&pdf.data[..]).map_err(|e| PdfError::ParseFailed {
+            reason: e.to_string(),
+        })?;
+
+        // Convert payload to bits
+        let payload_bits: Vec<u8> = payload
+            .as_bytes()
+            .iter()
+            .flat_map(|byte| (0..8).rev().map(move |i| (byte >> i) & 1))
+            .collect();
+
+        let mut bit_index = 0;
+
+        // Iterate through all objects to find content streams
+        let object_ids: Vec<_> = doc.objects.keys().copied().collect();
+        for obj_id in object_ids {
+            if bit_index >= payload_bits.len() {
+                break;
+            }
+
+            if let Ok(obj) = doc.get_object_mut(obj_id)
+                && let Object::Stream(stream) = obj
+            {
+                // Parse content stream
+                let content = String::from_utf8_lossy(&stream.content);
+                let mut modified_content = String::new();
+                let mut tokens: Vec<&str> = content.split_whitespace().collect();
+
+                for token in &mut tokens {
+                    if bit_index >= payload_bits.len() {
+                        modified_content.push_str(token);
+                        modified_content.push(' ');
+                        continue;
+                    }
+
+                    // Check if token is a number
+                    if let Ok(mut num) = token.parse::<i32>() {
+                        // Embed bit in LSB
+                        if payload_bits[bit_index] == 1 {
+                            num |= 1; // Set LSB
+                        } else {
+                            num &= !1; // Clear LSB
+                        }
+                        modified_content.push_str(&num.to_string());
+                        bit_index += 1;
+                    } else {
+                        modified_content.push_str(token);
+                    }
+                    modified_content.push(' ');
+                }
+
+                // Update stream content
+                stream.set_content(modified_content.trim().as_bytes().to_vec());
+            }
+        }
+
+        if bit_index < payload_bits.len() {
+            return Err(PdfError::EmbedFailed {
+                reason: format!(
+                    "insufficient capacity: embedded {bit_index}/{} bits",
+                    payload_bits.len()
+                ),
+            });
+        }
+
+        // Serialize modified PDF
+        let mut pdf_bytes = Vec::new();
+        doc.save_to(&mut pdf_bytes).map_err(|e| PdfError::EmbedFailed {
+            reason: e.to_string(),
+        })?;
+
+        Ok(CoverMedia {
+            kind: pdf.kind,
+            data: Bytes::from(pdf_bytes),
+            metadata: pdf.metadata,
+        })
     }
 
-    // TODO(T09): Implement content-stream LSB extraction
-    fn extract_from_content_stream(&self, _pdf: &CoverMedia) -> Result<Payload, PdfError> {
-        unimplemented!("T09: PDF content-stream extraction not yet implemented")
+    fn extract_from_content_stream(&self, pdf: &CoverMedia) -> Result<Payload, PdfError> {
+        // Load PDF from bytes
+        let doc = Document::load_from(&pdf.data[..]).map_err(|e| PdfError::ParseFailed {
+            reason: e.to_string(),
+        })?;
+
+        let mut extracted_bits = Vec::new();
+
+        // Iterate through all objects to find content streams
+        for obj in doc.objects.values() {
+            if let Object::Stream(stream) = obj {
+                // Parse content stream
+                let content = String::from_utf8_lossy(&stream.content);
+                let tokens: Vec<&str> = content.split_whitespace().collect();
+
+                for token in tokens {
+                    // Check if token is a number
+                    if let Ok(num) = token.parse::<i32>() {
+                        // Extract LSB
+                        #[expect(clippy::cast_sign_loss, reason = "LSB is always 0 or 1")]
+                        extracted_bits.push((num & 1) as u8);
+                    }
+                }
+            }
+        }
+
+        // Convert bits to bytes
+        if extracted_bits.is_empty() {
+            return Err(PdfError::ExtractFailed {
+                reason: "no numeric values found in content streams".to_string(),
+            });
+        }
+
+        let mut payload_bytes = Vec::new();
+        for chunk in extracted_bits.chunks(8) {
+            if chunk.len() == 8 {
+                let mut byte = 0u8;
+                for (i, bit) in chunk.iter().enumerate() {
+                    byte |= bit << (7 - i);
+                }
+                payload_bytes.push(byte);
+            }
+        }
+
+        Ok(Payload::from_bytes(payload_bytes))
     }
 
-    // TODO(T09): Implement XMP metadata embedding
     fn embed_in_metadata(
         &self,
-        _pdf: CoverMedia,
-        _payload: &Payload,
+        pdf: CoverMedia,
+        payload: &Payload,
     ) -> Result<CoverMedia, PdfError> {
-        unimplemented!("T09: PDF metadata embedding not yet implemented")
+        // Load PDF from bytes
+        let mut doc = Document::load_from(&pdf.data[..]).map_err(|e| PdfError::ParseFailed {
+            reason: e.to_string(),
+        })?;
+
+        // Base64-encode payload
+        let encoded = general_purpose::STANDARD.encode(payload.as_bytes());
+
+        // Create XMP metadata with custom field
+        let xmp_content = format!(
+            r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+      xmlns:sf="http://shadowforge.org/ns/1.0/">
+      <sf:HiddenData>{encoded}</sf:HiddenData>
+    </rdf:Description>
+  </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>"#
+        );
+
+        // Create metadata stream
+        let metadata_id = doc.add_object(lopdf::Stream::new(
+            lopdf::dictionary! {
+                "Type" => "Metadata",
+                "Subtype" => "XML",
+            },
+            xmp_content.into_bytes(),
+        ));
+
+        // Add metadata reference to catalog
+        if let Ok(catalog) = doc.catalog_mut() {
+            catalog.set("Metadata", Object::Reference(metadata_id));
+        } else {
+            return Err(PdfError::EmbedFailed {
+                reason: "failed to access catalog".to_string(),
+            });
+        }
+
+        // Serialize modified PDF
+        let mut pdf_bytes = Vec::new();
+        doc.save_to(&mut pdf_bytes).map_err(|e| PdfError::EmbedFailed {
+            reason: e.to_string(),
+        })?;
+
+        Ok(CoverMedia {
+            kind: pdf.kind,
+            data: Bytes::from(pdf_bytes),
+            metadata: pdf.metadata,
+        })
     }
 
-    // TODO(T09): Implement XMP metadata extraction
-    fn extract_from_metadata(&self, _pdf: &CoverMedia) -> Result<Payload, PdfError> {
-        unimplemented!("T09: PDF metadata extraction not yet implemented")
+    fn extract_from_metadata(&self, pdf: &CoverMedia) -> Result<Payload, PdfError> {
+        // Load PDF from bytes
+        let doc = Document::load_from(&pdf.data[..]).map_err(|e| PdfError::ParseFailed {
+            reason: e.to_string(),
+        })?;
+
+        // Get catalog
+        let catalog = doc.catalog().map_err(|e| PdfError::ExtractFailed {
+            reason: format!("failed to access catalog: {e}"),
+        })?;
+
+        // Get metadata reference
+        let metadata_ref = catalog
+            .get(b"Metadata")
+            .map_err(|_| PdfError::ExtractFailed {
+                reason: "no metadata found in catalog".to_string(),
+            })?
+            .as_reference()
+            .map_err(|_| PdfError::ExtractFailed {
+                reason: "metadata is not a reference".to_string(),
+            })?;
+
+        // Get metadata stream
+        let metadata_obj = doc.get_object(metadata_ref).map_err(|e| {
+            PdfError::ExtractFailed {
+                reason: format!("failed to get metadata object: {e}"),
+            }
+        })?;
+
+        let metadata_stream = metadata_obj.as_stream().map_err(|_| {
+            PdfError::ExtractFailed {
+                reason: "metadata is not a stream".to_string(),
+            }
+        })?;
+
+        // Parse XMP content
+        let xmp_content = String::from_utf8_lossy(&metadata_stream.content);
+
+        // Extract base64 data from <sf:HiddenData> tag
+        let start_tag = "<sf:HiddenData>";
+        let end_tag = "</sf:HiddenData>";
+
+        let start_idx = xmp_content
+            .find(start_tag)
+            .ok_or_else(|| PdfError::ExtractFailed {
+                reason: "no sf:HiddenData tag found".to_string(),
+            })?
+            .strict_add(start_tag.len());
+
+        let end_idx = xmp_content.find(end_tag).ok_or_else(|| {
+            PdfError::ExtractFailed {
+                reason: "no closing sf:HiddenData tag found".to_string(),
+            }
+        })?;
+
+        let encoded_data = &xmp_content[start_idx..end_idx];
+
+        // Decode base64
+        let decoded = general_purpose::STANDARD
+            .decode(encoded_data.trim())
+            .map_err(|e| PdfError::ExtractFailed {
+                reason: format!("base64 decode failed: {e}"),
+            })?;
+
+        Ok(Payload::from_bytes(decoded))
     }
 }
 
@@ -589,5 +819,129 @@ mod tests {
         // Try to load it
         let result = processor.load_pdf(&path);
         assert!(matches!(result, Err(PdfError::Encrypted)));
+    }
+
+    #[test]
+    fn test_content_stream_lsb_roundtrip() {
+        let processor = PdfProcessorImpl::default();
+        let dir = tempdir().expect("create tempdir");
+        let path = dir.path().join("test.pdf");
+
+        // Create a test PDF with content stream
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let page_id = doc.new_object_id();
+
+        doc.objects.insert(
+            page_id,
+            Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Page",
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+                "Contents" => Object::Reference((page_id.0 + 1, 0)),
+            }),
+        );
+
+        // Content stream with many numeric values for capacity
+        let content = b"BT\n/F1 12 Tf\n100 700 Td\n(Hello) Tj\n200 650 Td\n(World) Tj\n50 600 Td\n(Test) Tj\n150 550 Td\n(PDF) Tj\nET\n1 0 0 1 0 0 cm\n";
+        doc.add_object(lopdf::Stream::new(
+            lopdf::dictionary! {},
+            content.to_vec(),
+        ));
+
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+
+        let catalog_id = doc.add_object(lopdf::dictionary! {
+            "Type" => "Catalog",
+            "Pages" => Object::Reference(pages_id),
+        });
+
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        doc.save(&path).expect("save test PDF");
+
+        // Load and embed payload (very small to fit limited capacity)
+        let original = processor.load_pdf(&path).expect("load");
+        let payload = Payload::from_bytes(vec![0xAB]); // 1 byte = 8 bits (need 8+ numbers)
+        let stego = processor
+            .embed_in_content_stream(original.clone(), &payload)
+            .expect("embed");
+
+        // Verify PDF is still parseable
+        let stego_path = dir.path().join("stego.pdf");
+        processor.save_pdf(&stego, &stego_path).expect("save stego");
+        let reloaded = processor.load_pdf(&stego_path).expect("reload stego");
+
+        // Extract and verify
+        let extracted = processor
+            .extract_from_content_stream(&reloaded)
+            .expect("extract");
+        assert_eq!(extracted.as_bytes(), payload.as_bytes());
+    }
+
+    #[test]
+    fn test_metadata_embed_roundtrip() {
+        let processor = PdfProcessorImpl::default();
+        let dir = tempdir().expect("create tempdir");
+        let path = dir.path().join("test.pdf");
+
+        // Create a minimal test PDF
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let page_id = doc.new_object_id();
+
+        doc.objects.insert(
+            page_id,
+            Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Page",
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+                "Contents" => Object::Reference((page_id.0 + 1, 0)),
+            }),
+        );
+
+        doc.add_object(lopdf::Stream::new(
+            lopdf::dictionary! {},
+            b"".to_vec(),
+        ));
+
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+
+        let catalog_id = doc.add_object(lopdf::dictionary! {
+            "Type" => "Catalog",
+            "Pages" => Object::Reference(pages_id),
+        });
+
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        doc.save(&path).expect("save test PDF");
+
+        // Load and embed payload
+        let original = processor.load_pdf(&path).expect("load");
+        let payload = Payload::from_bytes(vec![0u8; 128]); // 128-byte payload
+        let stego = processor
+            .embed_in_metadata(original.clone(), &payload)
+            .expect("embed");
+
+        // Verify PDF is still parseable
+        let stego_path = dir.path().join("stego.pdf");
+        processor.save_pdf(&stego, &stego_path).expect("save stego");
+        let reloaded = processor.load_pdf(&stego_path).expect("reload stego");
+
+        // Extract and verify
+        let extracted = processor
+            .extract_from_metadata(&reloaded)
+            .expect("extract");
+        assert_eq!(extracted.as_bytes(), payload.as_bytes());
     }
 }
