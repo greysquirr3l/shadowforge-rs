@@ -80,7 +80,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T11 — LSB image steganography (PNG/BMP) | `[ ]` | |
+| T11 — LSB image steganography (PNG/BMP) | `[x]` | |
 | T12 — DCT-based JPEG steganography | `[ ]` | |
 | T13 — Palette-based steganography (GIF/PNG indexed) | `[ ]` | |
 | T14 — LSB audio, phase encoding (DSSS), and echo hiding (WAV) | `[ ]` | |
@@ -249,3 +249,8 @@
 - T10: When implementing multiple traits with same method names (e.g., `technique()`), calling `self.technique()` becomes ambiguous — use concrete enum values instead.
 - T10: Both `EmbedTechnique` and `ExtractTechnique` require implementing `technique()` method.
 - T10: Wrapper pattern for adapters: delegate to underlying port implementation (e.g., `PdfContentStreamLsb` wraps `PdfProcessor`).
+- T11: `StegoError::PayloadTooLarge` (not `InsufficientCapacity`) is the correct variant for capacity errors.
+- T11: Use `checked_mul()` and `checked_sub()` (not `strict_mul()`/`strict_sub()`) for overflow-checked arithmetic in Rust.
+- T11: LSB embedding header uses 32-bit big-endian length, limiting max payload to `u32::MAX` bytes.
+- T11: LSB embedding operates on RGB channels only — skip alpha channel to preserve transparency.
+- T11: Use `#[expect(clippy::cast_possible_truncation, reason = \"...\")]` for documented intentional casts.

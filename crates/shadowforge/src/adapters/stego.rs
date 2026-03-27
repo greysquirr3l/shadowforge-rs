@@ -148,6 +148,210 @@ impl ExtractTechnique for PdfMetadataEmbed {
     }
 }
 
+/// LSB image steganography adapter for PNG/BMP.
+///
+/// Embeds payload in the least significant bits of RGB channels only
+/// (alpha channel is untouched). Header encodes 32-bit big-endian payload length.
+#[derive(Debug, Default)]
+pub struct LsbImage;
+
+impl LsbImage {
+    /// Create a new LSB image embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl EmbedTechnique for LsbImage {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::LsbImage
+    }
+
+    fn capacity(&self, cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        // Only PNG and BMP are supported
+        match cover.kind {
+            CoverMediaKind::PngImage | CoverMediaKind::BmpImage => {}
+            _ => {
+                return Err(StegoError::UnsupportedCoverType {
+                    reason: format!("LSB image requires PNG or BMP, got {:?}", cover.kind),
+                })
+            }
+        }
+
+        // Parse dimensions from metadata
+        let width: u32 = cover
+            .metadata
+            .get("width")
+            .ok_or_else(|| StegoError::MalformedCoverData {
+                reason: "missing width metadata".to_string(),
+            })?
+            .parse()
+            .map_err(|e: std::num::ParseIntError| StegoError::MalformedCoverData {
+                reason: format!("invalid width: {e}"),
+            })?;
+
+        let height: u32 = cover
+            .metadata
+            .get("height")
+            .ok_or_else(|| StegoError::MalformedCoverData {
+                reason: "missing height metadata".to_string(),
+            })?
+            .parse()
+            .map_err(|e: std::num::ParseIntError| StegoError::MalformedCoverData {
+                reason: format!("invalid height: {e}"),
+            })?;
+
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| StegoError::MalformedCoverData {
+                reason: "pixel count overflow".to_string(),
+            })?;
+
+        // Capacity: 3 bits per pixel (R, G, B), minus 32 bits for header
+        // = (pixel_count * 3 - 32) / 8 bytes
+        let bits = pixel_count
+            .checked_mul(3)
+            .and_then(|b| b.checked_sub(32))
+            .ok_or_else(|| StegoError::MalformedCoverData {
+                reason: "capacity calculation overflow".to_string(),
+            })?;
+
+        let bytes = u64::from(bits / 8);
+
+        Ok(Capacity {
+            bytes,
+            technique: StegoTechnique::LsbImage,
+        })
+    }
+
+    fn embed(&self, mut cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
+        // Check cover type
+        match cover.kind {
+            CoverMediaKind::PngImage | CoverMediaKind::BmpImage => {}
+            _ => {
+                return Err(StegoError::UnsupportedCoverType {
+                    reason: format!("LSB image requires PNG or BMP, got {:?}", cover.kind),
+                })
+            }
+        }
+
+        // Check capacity
+        let cap = self.capacity(&cover)?;
+        let payload_len = payload.as_bytes().len() as u64;
+        if payload_len > cap.bytes {
+            return Err(StegoError::PayloadTooLarge {
+                needed: payload_len,
+                available: cap.bytes,
+            });
+        }
+
+        // Check that payload length fits in 32-bit header
+        if payload_len > u64::from(u32::MAX) {
+            return Err(StegoError::PayloadTooLarge {
+                needed: payload_len,
+                available: u64::from(u32::MAX),
+            });
+        }
+
+        // Get mutable access to pixel data
+        let data = cover.data.to_vec();
+        let mut pixels = data;
+
+        // Embed 32-bit big-endian payload length in first 32 LSBs
+        #[expect(clippy::cast_possible_truncation, reason = "checked above: payload_len <= u32::MAX")]
+        let len_bytes = (payload_len as u32).to_be_bytes();
+        for (byte_idx, byte) in len_bytes.iter().enumerate() {
+            for bit_idx in 0..8 {
+                let bit = (byte >> (7 - bit_idx)) & 1;
+                let pixel_idx = byte_idx * 8 + bit_idx;
+
+                // RGB only, skip alpha (every 4th byte)
+                let channel_idx = pixel_idx / 3;
+                let rgb_offset = pixel_idx % 3;
+                let byte_pos = channel_idx * 4 + rgb_offset;
+
+                pixels[byte_pos] = (pixels[byte_pos] & 0xFE) | bit;
+            }
+        }
+
+        // Embed payload bits starting after header (32 bits)
+        let payload_bytes = payload.as_bytes();
+        for (byte_idx, byte) in payload_bytes.iter().enumerate() {
+            for bit_idx in 0..8 {
+                let bit = (byte >> (7 - bit_idx)) & 1;
+                let pixel_idx = 32 + byte_idx * 8 + bit_idx;
+
+                // RGB only, skip alpha
+                let channel_idx = pixel_idx / 3;
+                let rgb_offset = pixel_idx % 3;
+                let byte_pos = channel_idx * 4 + rgb_offset;
+
+                pixels[byte_pos] = (pixels[byte_pos] & 0xFE) | bit;
+            }
+        }
+
+        cover.data = pixels.into();
+        Ok(cover)
+    }
+}
+
+impl ExtractTechnique for LsbImage {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::LsbImage
+    }
+
+    fn extract(&self, cover: &CoverMedia) -> Result<Payload, StegoError> {
+        // Check cover type
+        match cover.kind {
+            CoverMediaKind::PngImage | CoverMediaKind::BmpImage => {}
+            _ => {
+                return Err(StegoError::UnsupportedCoverType {
+                    reason: format!("LSB image requires PNG or BMP, got {:?}", cover.kind),
+                })
+            }
+        }
+
+        let pixels = cover.data.as_ref();
+
+        // Extract 32-bit big-endian payload length from first 32 LSBs
+        let mut len_bytes = [0u8; 4];
+        for (byte_idx, len_byte) in len_bytes.iter_mut().enumerate() {
+            for bit_idx in 0..8 {
+                let pixel_idx = byte_idx * 8 + bit_idx;
+
+                // RGB only, skip alpha
+                let channel_idx = pixel_idx / 3;
+                let rgb_offset = pixel_idx % 3;
+                let byte_pos = channel_idx * 4 + rgb_offset;
+
+                let bit = pixels[byte_pos] & 1;
+                *len_byte |= bit << (7 - bit_idx);
+            }
+        }
+
+        let payload_len = u32::from_be_bytes(len_bytes) as usize;
+
+        // Extract payload bits
+        let mut payload_bytes = vec![0u8; payload_len];
+        for (byte_idx, payload_byte) in payload_bytes.iter_mut().enumerate() {
+            for bit_idx in 0..8 {
+                let pixel_idx = 32 + byte_idx * 8 + bit_idx;
+
+                // RGB only, skip alpha
+                let channel_idx = pixel_idx / 3;
+                let rgb_offset = pixel_idx % 3;
+                let byte_pos = channel_idx * 4 + rgb_offset;
+
+                let bit = pixels[byte_pos] & 1;
+                *payload_byte |= bit << (7 - bit_idx);
+            }
+        }
+
+        Ok(Payload::from_bytes(payload_bytes))
+    }
+}
+
 // TODO(T11): Implement PdfPageStegoService after LsbImage is available
 // This service will:
 // - Render PDF pages to PNG images
@@ -260,5 +464,134 @@ mod tests {
 
         let result = embedder.embed(cover, &payload);
         assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+    }
+
+    #[test]
+    fn test_lsb_image_roundtrip_256x256() {
+        let embedder = LsbImage::new();
+
+        // Create 256x256 white RGBA image
+        let width = 256_u32;
+        let height = 256_u32;
+        let pixel_count = width * height;
+        let data = vec![255u8; (pixel_count * 4) as usize]; // RGBA
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: data.into(),
+            metadata,
+        };
+
+        // 64-byte payload
+        let payload = Payload::from_bytes(vec![0xAB; 64]);
+
+        // Embed
+        let stego = embedder.embed(cover.clone(), &payload).expect("embed");
+
+        // Verify pixel changes are ±1
+        let orig_pixels = cover.data.as_ref();
+        let stego_pixels = stego.data.as_ref();
+        for (i, (orig, stego_val)) in orig_pixels.iter().zip(stego_pixels.iter()).enumerate() {
+            let diff = orig.abs_diff(*stego_val);
+            assert!(
+                diff <= 1,
+                "pixel at index {i} changed by more than 1: {orig} -> {stego_val}"
+            );
+        }
+
+        // Extract
+        let extracted = embedder.extract(&stego).expect("extract");
+        assert_eq!(extracted.as_bytes(), payload.as_bytes());
+    }
+
+    #[test]
+    fn test_lsb_image_capacity_10x10() {
+        let embedder = LsbImage::new();
+
+        let width = 10_u32;
+        let height = 10_u32;
+        let pixel_count = width * height;
+        let data = vec![0u8; (pixel_count * 4) as usize];
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: data.into(),
+            metadata,
+        };
+
+        let cap = embedder.capacity(&cover).expect("capacity");
+
+        // 10x10 = 100 pixels
+        // 100 * 3 = 300 bits
+        // 300 - 32 (header) = 268 bits
+        // 268 / 8 = 33 bytes
+        assert_eq!(cap.bytes, 33);
+        assert_eq!(cap.technique, StegoTechnique::LsbImage);
+    }
+
+    #[test]
+    fn test_lsb_image_insufficient_capacity() {
+        let embedder = LsbImage::new();
+
+        let width = 10_u32;
+        let height = 10_u32;
+        let pixel_count = width * height;
+        let data = vec![0u8; (pixel_count * 4) as usize];
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: data.into(),
+            metadata,
+        };
+
+        // Try to embed 100 bytes (capacity is only 33)
+        let payload = Payload::from_bytes(vec![0xAB; 100]);
+
+        let result = embedder.embed(cover, &payload);
+        assert!(matches!(
+            result,
+            Err(StegoError::PayloadTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn test_lsb_image_bmp_support() {
+        let embedder = LsbImage::new();
+
+        let width = 100_u32;
+        let height = 100_u32;
+        let pixel_count = width * height;
+        let data = vec![128u8; (pixel_count * 4) as usize];
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), width.to_string());
+        metadata.insert("height".to_string(), height.to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::BmpImage,
+            data: data.into(),
+            metadata,
+        };
+
+        let payload = Payload::from_bytes(vec![1, 2, 3, 4, 5]);
+
+        // Embed
+        let stego = embedder.embed(cover, &payload).expect("embed");
+
+        // Extract
+        let extracted = embedder.extract(&stego).expect("extract");
+        assert_eq!(extracted.as_bytes(), payload.as_bytes());
     }
 }
