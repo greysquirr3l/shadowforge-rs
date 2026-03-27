@@ -70,7 +70,7 @@
 | --- | --- | --- |
 | T08 — PDF load/save and page-render-to-image pipeline | `[x]` | |
 | T09 — PDF-native stego: content-stream LSB and XMP metadata watermarking | `[x]` | |
-| T10 — PDF render-stego-rebuild pipeline and distribution integration | `[ ]` | |
+| T10 — PDF render-stego-rebuild pipeline and distribution integration | `[x]` | |
 
 ---
 
@@ -244,3 +244,8 @@
 - T09: XMP metadata can be embedded in custom namespaces (`sf:HiddenData`) in PDF /Metadata streams.
 - T09: `base64` crate encoding uses `base64::engine::general_purpose::STANDARD.encode()` and `.decode()`.
 - T09: Use `doc.catalog_mut()` for mutable catalog access to add /Metadata reference.
+- T10: `StegoError` variants use a `reason: String` field (not technique/cover_kind) for error details.
+- T10: `Capacity` struct has `bytes: u64` and `technique: StegoTechnique` fields (not bytes_available/bytes_required).
+- T10: When implementing multiple traits with same method names (e.g., `technique()`), calling `self.technique()` becomes ambiguous — use concrete enum values instead.
+- T10: Both `EmbedTechnique` and `ExtractTechnique` require implementing `technique()` method.
+- T10: Wrapper pattern for adapters: delegate to underlying port implementation (e.g., `PdfContentStreamLsb` wraps `PdfProcessor`).

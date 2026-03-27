@@ -6,3 +6,5 @@ pub mod media;
 
 #[cfg(feature = "pdf")]
 pub mod pdf;
+
+pub mod stego;
