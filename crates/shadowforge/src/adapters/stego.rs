@@ -464,6 +464,289 @@ impl ExtractTechnique for PaletteStego {
     }
 }
 
+/// LSB audio steganography adapter for WAV files.
+///
+/// Embeds payload in the least significant bits of i16 audio samples.
+/// Header encodes 32-bit big-endian payload length in first 32 sample LSBs.
+#[derive(Debug, Default)]
+pub struct LsbAudio;
+
+impl LsbAudio {
+    /// Create a new LSB audio embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl EmbedTechnique for LsbAudio {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::LsbAudio
+    }
+
+    fn capacity(&self, cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        // Only WAV audio is supported
+        if cover.kind != CoverMediaKind::WavAudio {
+            return Err(StegoError::UnsupportedCoverType {
+                reason: format!("LSB audio requires WAV, got {:?}", cover.kind),
+            });
+        }
+
+        // Sample count is data length / 2 (i16 = 2 bytes)
+        let sample_count = cover.data.len() / 2;
+
+        // Need at least 32 samples for header
+        if sample_count < 32 {
+            return Err(StegoError::MalformedCoverData {
+                reason: "audio too short for LSB embedding (need at least 32 samples)".to_string(),
+            });
+        }
+
+        // Capacity: (sample_count - 32) / 8 bytes
+        let capacity_bits = sample_count.checked_sub(32).ok_or_else(|| {
+            StegoError::MalformedCoverData {
+                reason: "capacity calculation underflow".to_string(),
+            }
+        })?;
+
+        let bytes = (capacity_bits / 8) as u64;
+
+        Ok(Capacity {
+            bytes,
+            technique: StegoTechnique::LsbAudio,
+        })
+    }
+
+    fn embed(&self, mut cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
+        // Check cover type
+        if cover.kind != CoverMediaKind::WavAudio {
+            return Err(StegoError::UnsupportedCoverType {
+                reason: format!("LSB audio requires WAV, got {:?}", cover.kind),
+            });
+        }
+
+        // Check capacity
+        let cap = self.capacity(&cover)?;
+        let payload_len = payload.as_bytes().len() as u64;
+        if payload_len > cap.bytes {
+            return Err(StegoError::PayloadTooLarge {
+                needed: payload_len,
+                available: cap.bytes,
+            });
+        }
+
+        // Check that payload length fits in 32-bit header
+        if payload_len > u64::from(u32::MAX) {
+            return Err(StegoError::PayloadTooLarge {
+                needed: payload_len,
+                available: u64::from(u32::MAX),
+            });
+        }
+
+        // Get mutable access to sample data (i16 little-endian)
+        let mut samples = cover.data.to_vec();
+
+        // Embed 32-bit big-endian payload length in first 32 sample LSBs
+        #[expect(clippy::cast_possible_truncation, reason = "checked above: payload_len <= u32::MAX")]
+        let len_bytes = (payload_len as u32).to_be_bytes();
+        for (byte_idx, byte) in len_bytes.iter().enumerate() {
+            for bit_idx in 0..8 {
+                let bit = (byte >> (7 - bit_idx)) & 1;
+                let sample_idx = byte_idx * 8 + bit_idx;
+
+                // Modify LSB of i16 sample (little-endian)
+                let byte_pos = sample_idx * 2; // i16 = 2 bytes
+                samples[byte_pos] = (samples[byte_pos] & 0xFE) | bit;
+            }
+        }
+
+        // Embed payload bits starting after header (32 samples)
+        let payload_bytes = payload.as_bytes();
+        for (byte_idx, byte) in payload_bytes.iter().enumerate() {
+            for bit_idx in 0..8 {
+                let bit = (byte >> (7 - bit_idx)) & 1;
+                let sample_idx = 32 + byte_idx * 8 + bit_idx;
+
+                let byte_pos = sample_idx * 2;
+                samples[byte_pos] = (samples[byte_pos] & 0xFE) | bit;
+            }
+        }
+
+        cover.data = samples.into();
+        Ok(cover)
+    }
+}
+
+impl ExtractTechnique for LsbAudio {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::LsbAudio
+    }
+
+    fn extract(&self, cover: &CoverMedia) -> Result<Payload, StegoError> {
+        // Check cover type
+        if cover.kind != CoverMediaKind::WavAudio {
+            return Err(StegoError::UnsupportedCoverType {
+                reason: format!("LSB audio requires WAV, got {:?}", cover.kind),
+            });
+        }
+
+        let samples = cover.data.as_ref();
+
+        // Need at least 32 samples for header
+        if samples.len() < 64 {
+            // 32 samples * 2 bytes
+            return Err(StegoError::MalformedCoverData {
+                reason: "audio too short to extract payload".to_string(),
+            });
+        }
+
+        // Extract 32-bit big-endian payload length from first 32 sample LSBs
+        let mut len_bytes = [0u8; 4];
+        for (byte_idx, len_byte) in len_bytes.iter_mut().enumerate() {
+            for bit_idx in 0..8 {
+                let sample_idx = byte_idx * 8 + bit_idx;
+                let byte_pos = sample_idx * 2;
+
+                let bit = samples[byte_pos] & 1;
+                *len_byte |= bit << (7 - bit_idx);
+            }
+        }
+
+        let payload_len = u32::from_be_bytes(len_bytes) as usize;
+
+        // Sanity check payload length
+        let max_samples = samples.len() / 2;
+        if payload_len > (max_samples.saturating_sub(32)) / 8 {
+            return Err(StegoError::MalformedCoverData {
+                reason: format!("invalid payload length: {payload_len}"),
+            });
+        }
+
+        // Extract payload bits
+        let mut payload_bytes = vec![0u8; payload_len];
+        for (byte_idx, payload_byte) in payload_bytes.iter_mut().enumerate() {
+            for bit_idx in 0..8 {
+                let sample_idx = 32 + byte_idx * 8 + bit_idx;
+                let byte_pos = sample_idx * 2;
+
+                let bit = samples[byte_pos] & 1;
+                *payload_byte |= bit << (7 - bit_idx);
+            }
+        }
+
+        Ok(Payload::from_bytes(payload_bytes))
+    }
+}
+
+/// Phase encoding (DSSS) audio steganography adapter (STUB).
+///
+/// **NOT YET IMPLEMENTED**: Requires FFT/IFFT and phase manipulation.
+///
+/// TODO(T14): Implement phase encoding:
+/// - Segment audio into blocks
+/// - Apply FFT to each segment
+/// - Embed one bit per segment by phase shift
+/// - Adaptive alpha: scale shift by segment energy
+/// - Apply IFFT to reconstruct samples
+/// - Requires audio DSP library (rustfft or similar)
+#[derive(Debug, Default)]
+pub struct PhaseEncoding;
+
+impl PhaseEncoding {
+    /// Create a new phase encoding embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl EmbedTechnique for PhaseEncoding {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::PhaseEncoding
+    }
+
+    fn capacity(&self, _cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Phase encoding not yet implemented (requires FFT/phase manipulation)"
+                .to_string(),
+        })
+    }
+
+    fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Phase encoding not yet implemented (requires FFT/phase manipulation)"
+                .to_string(),
+        })
+    }
+}
+
+impl ExtractTechnique for PhaseEncoding {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::PhaseEncoding
+    }
+
+    fn extract(&self, _cover: &CoverMedia) -> Result<Payload, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Phase encoding not yet implemented (requires FFT/phase manipulation)"
+                .to_string(),
+        })
+    }
+}
+
+/// Echo hiding audio steganography adapter (STUB).
+///
+/// **NOT YET IMPLEMENTED**: Requires echo synthesis and autocorrelation.
+///
+/// TODO(T14): Implement echo hiding:
+/// - Two echo delays (d0, d1) for bit 0/1
+/// - Embed by adding delayed echo to audio
+/// - Extract via autocorrelation peak detection
+/// - Use `array_windows` for autocorrelation computation
+/// - Requires audio DSP operations
+#[derive(Debug, Default)]
+pub struct EchoHiding;
+
+impl EchoHiding {
+    /// Create a new echo hiding embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl EmbedTechnique for EchoHiding {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::EchoHiding
+    }
+
+    fn capacity(&self, _cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Echo hiding not yet implemented (requires echo synthesis and autocorrelation)"
+                .to_string(),
+        })
+    }
+
+    fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Echo hiding not yet implemented (requires echo synthesis and autocorrelation)"
+                .to_string(),
+        })
+    }
+}
+
+impl ExtractTechnique for EchoHiding {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::EchoHiding
+    }
+
+    fn extract(&self, _cover: &CoverMedia) -> Result<Payload, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Echo hiding not yet implemented (requires echo synthesis and autocorrelation)"
+                .to_string(),
+        })
+    }
+}
+
 // TODO(T11): Implement PdfPageStegoService after LsbImage is available
 // This service will:
 // - Render PDF pages to PNG images
@@ -743,6 +1026,152 @@ mod tests {
         let payload = Payload::from_bytes(vec![1, 2, 3]);
 
         // Should return UnsupportedCoverType error indicating not implemented
+        let result = embedder.embed(cover.clone(), &payload);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.extract(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+    }
+
+    #[test]
+    fn test_lsb_audio_roundtrip() {
+        let embedder = LsbAudio::new();
+
+        // Create 1s of 44100 Hz 16-bit mono silence (44100 samples)
+        let sample_rate = 44100;
+        let sample_count = sample_rate; // 1 second
+        let mut data = Vec::new();
+        for _ in 0..sample_count {
+            data.extend_from_slice(&0_i16.to_le_bytes());
+        }
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("sample_rate".to_string(), sample_rate.to_string());
+        metadata.insert("channels".to_string(), "1".to_string());
+        metadata.insert("bits_per_sample".to_string(), "16".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: data.into(),
+            metadata,
+        };
+
+        // 512-byte payload
+        let payload = Payload::from_bytes(vec![0xAB; 512]);
+
+        // Embed
+        let stego = embedder.embed(cover, &payload).expect("embed");
+
+        // Extract
+        let extracted = embedder.extract(&stego).expect("extract");
+        assert_eq!(extracted.as_bytes(), payload.as_bytes());
+    }
+
+    #[test]
+    fn test_lsb_audio_capacity() {
+        let embedder = LsbAudio::new();
+
+        // 1000 samples
+        let sample_count = 1000;
+        let mut data = Vec::new();
+        for _ in 0..sample_count {
+            data.extend_from_slice(&0_i16.to_le_bytes());
+        }
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("sample_rate".to_string(), "44100".to_string());
+        metadata.insert("channels".to_string(), "1".to_string());
+        metadata.insert("bits_per_sample".to_string(), "16".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: data.into(),
+            metadata,
+        };
+
+        let cap = embedder.capacity(&cover).expect("capacity");
+
+        // 1000 samples - 32 (header) = 968 bits / 8 = 121 bytes
+        assert_eq!(cap.bytes, 121);
+        assert_eq!(cap.technique, StegoTechnique::LsbAudio);
+    }
+
+    #[test]
+    fn test_lsb_audio_insufficient_capacity() {
+        let embedder = LsbAudio::new();
+
+        // 100 samples (very short audio)
+        let sample_count = 100;
+        let mut data = Vec::new();
+        for _ in 0..sample_count {
+            data.extend_from_slice(&0_i16.to_le_bytes());
+        }
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("sample_rate".to_string(), "44100".to_string());
+        metadata.insert("channels".to_string(), "1".to_string());
+        metadata.insert("bits_per_sample".to_string(), "16".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: data.into(),
+            metadata,
+        };
+
+        // Try to embed 100 bytes (capacity is only 8 bytes)
+        let payload = Payload::from_bytes(vec![0xAB; 100]);
+
+        let result = embedder.embed(cover, &payload);
+        assert!(matches!(result, Err(StegoError::PayloadTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_phase_encoding_stub_returns_not_implemented() {
+        let embedder = PhaseEncoding::new();
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("sample_rate".to_string(), "44100".to_string());
+        metadata.insert("channels".to_string(), "1".to_string());
+        metadata.insert("bits_per_sample".to_string(), "16".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: vec![0; 1000].into(),
+            metadata,
+        };
+
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+
+        let result = embedder.embed(cover.clone(), &payload);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.extract(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+    }
+
+    #[test]
+    fn test_echo_hiding_stub_returns_not_implemented() {
+        let embedder = EchoHiding::new();
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("sample_rate".to_string(), "44100".to_string());
+        metadata.insert("channels".to_string(), "1".to_string());
+        metadata.insert("bits_per_sample".to_string(), "16".to_string());
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: vec![0; 1000].into(),
+            metadata,
+        };
+
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+
         let result = embedder.embed(cover.clone(), &payload);
         assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
 
