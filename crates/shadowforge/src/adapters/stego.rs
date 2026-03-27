@@ -747,6 +747,59 @@ impl ExtractTechnique for EchoHiding {
     }
 }
 
+/// Zero-width character text steganography adapter (STUB).
+///
+/// **NOT YET IMPLEMENTED**: Zero-width Unicode characters (ZWSP, ZWNJ, ZWJ, etc.)
+/// have complex grapheme clustering rules that make reliable embedding/extraction
+/// difficult. Format characters can be combined with adjacent characters by the
+/// Unicode grapheme segmentation algorithm in context-dependent ways.
+///
+/// TODO(T15): Implement zero-width text steganography:
+/// - Research Unicode-safe zero-width character pairs that remain separate graphemes
+/// - Consider alternative approaches (variation selectors, combining marks)
+/// - Extensive testing with all Unicode scripts (Arabic, Thai, Devanagari, emoji ZWJ sequences)
+/// - Validate grapheme-cluster safety across all contexts
+#[derive(Debug, Default)]
+pub struct ZeroWidthText;
+
+impl ZeroWidthText {
+    /// Create a new zero-width text embedder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl EmbedTechnique for ZeroWidthText {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::ZeroWidthText
+    }
+
+    fn capacity(&self, _cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Zero-width text steganography not yet implemented (Unicode grapheme segmentation complexity)".to_string(),
+        })
+    }
+
+    fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Zero-width text steganography not yet implemented (Unicode grapheme segmentation complexity)".to_string(),
+        })
+    }
+}
+
+impl ExtractTechnique for ZeroWidthText {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::ZeroWidthText
+    }
+
+    fn extract(&self, _cover: &CoverMedia) -> Result<Payload, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: "Zero-width text steganography not yet implemented (Unicode grapheme segmentation complexity)".to_string(),
+        })
+    }
+}
+
 // TODO(T11): Implement PdfPageStegoService after LsbImage is available
 // This service will:
 // - Render PDF pages to PNG images
@@ -1168,6 +1221,28 @@ mod tests {
             kind: CoverMediaKind::WavAudio,
             data: vec![0; 1000].into(),
             metadata,
+        };
+
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+
+        let result = embedder.embed(cover.clone(), &payload);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.extract(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+    }
+
+    #[test]
+    fn test_zero_width_text_stub_returns_not_implemented() {
+        let embedder = ZeroWidthText::new();
+
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PlainText,
+            data: "Hello, world!".as_bytes().to_vec().into(),
+            metadata: std::collections::HashMap::new(),
         };
 
         let payload = Payload::from_bytes(vec![1, 2, 3]);

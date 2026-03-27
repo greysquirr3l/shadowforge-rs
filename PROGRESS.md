@@ -84,7 +84,7 @@
 | T12 — DCT-based JPEG steganography | `[x]` | Stubbed: requires pure-Rust DCT coefficient access |
 | T13 — Palette-based steganography (GIF/PNG indexed) | `[x]` | Stubbed: requires palette extraction |
 | T14 — LSB audio, phase encoding (DSSS), and echo hiding (WAV) | `[x]` | LsbAudio complete; PhaseEncoding/EchoHiding stubbed |
-| T15 — Zero-width character text steganography with full Unicode/grapheme safety | `[ ]` | |
+| T15 — Zero-width character text steganography with full Unicode/grapheme safety | `[x]` | Stubbed: Unicode grapheme segmentation complexity |
 
 ---
 
@@ -264,3 +264,8 @@
 - T14: Audio capacity: (sample_count - 32) / 8 bytes, where 32 samples store the payload length header.
 - T14: Phase encoding (DSSS) requires FFT/IFFT operations — no suitable pure-Rust audio DSP library available.
 - T14: Echo hiding requires echo synthesis and autocorrelation — complex DSP operations beyond basic LSB.
+- T15: Zero-width Unicode characters (ZWSP, ZWNJ, ZWJ) have complex grapheme clustering rules.
+- T15: Format characters can be combined with adjacent characters by Unicode grapheme segmentation algorithm.
+- T15: ZWJ (Zero Width Joiner) acts as grapheme extender and gets merged into preceding grapheme cluster.
+- T15: ZWNJ (Zero Width Non-Joiner) also has context-dependent grapheme clustering behavior.
+- T15: Unicode text steganography requires extensive research into grapheme-safe character pairs across all scripts.
