@@ -472,6 +472,24 @@ pub struct CanaryShard {
     pub notify_url: Option<String>,
 }
 
+// ─── RetrievalManifest ────────────────────────────────────────────────────────
+
+/// Out-of-band metadata describing where and how to retrieve a dead-drop cover.
+///
+/// Shared over a separate steganographic channel so the recipient knows
+/// which public post to fetch and which technique to extract with.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrievalManifest {
+    /// Target platform the cover was posted to.
+    pub platform: PlatformProfile,
+    /// Public URL where the stego cover can be retrieved.
+    pub retrieval_url: String,
+    /// Steganographic technique used for embedding.
+    pub technique: StegoTechnique,
+    /// SHA-256 hex digest of the stego cover bytes (for integrity check).
+    pub stego_hash: String,
+}
+
 // ─── GeographicManifest ───────────────────────────────────────────────────────
 
 /// Manifest requiring shards to cross jurisdictional boundaries.

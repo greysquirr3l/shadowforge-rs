@@ -3,6 +3,7 @@
 pub mod canary;
 pub mod correction;
 pub mod crypto;
+pub mod deadrop;
 pub mod media;
 
 #[cfg(feature = "pdf")]

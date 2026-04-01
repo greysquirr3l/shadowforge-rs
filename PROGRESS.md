@@ -118,7 +118,7 @@
 | Task | Status | Notes |
 | --- | --- | --- |
 | T21 — Canary shard tripwires for K-of-N distribution compromise detection | `[x]` | |
-| T22 — Dead drop mode: platform-aware cover generation for public posting | `[ ]` | |
+| T22 — Dead drop mode: platform-aware cover generation for public posting | `[x]` | |
 
 ---
 
@@ -283,3 +283,5 @@
 - T21: `StegoError::PayloadTooLarge` uses field `needed` (not `required`).
 - T21: `CoverMediaKind::PngImage` (not `Png`) — enum variants use full descriptive names.
 - T21: clippy `similar_names` flags `embedded` vs `embedder` — rename to `placed` or similar.
+- T22: `RetrievalManifest` type added to `types.rs` for out-of-band dead-drop metadata sharing.
+- T22: `PlatformProfile::Telegram` is the lossless path — simple LSB embed suffices, no compression modeling needed.
