@@ -128,7 +128,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T23 — Time-lock puzzle payloads using Rivest iterated hash chains | `[ ]` | |
+| T23 — Time-lock puzzle payloads using Rivest iterated hash chains | `[x]` | |
 | T24 — Linguistic stylometric fingerprint scrubbing | `[ ]` | |
 
 ---
@@ -285,3 +285,6 @@
 - T21: clippy `similar_names` flags `embedded` vs `embedder` — rename to `placed` or similar.
 - T22: `RetrievalManifest` type added to `types.rs` for out-of-band dead-drop metadata sharing.
 - T22: `PlatformProfile::Telegram` is the lossless path — simple LSB embed suffices, no compression modeling needed.
+- T23: `num-bigint 0.4` `RandBigInt` trait expects `rand 0.8` — incompatible with `rand 0.10`. Generate random bytes with `rand::Rng::fill_bytes` and construct `BigUint::from_bytes_be` instead.
+- T23: Use `.cast_unsigned()` instead of `as u64` for `i64 -> u64` to satisfy `clippy::cast_sign_loss`.
+- T23: Use `.div_ceil()` instead of manual `(x + 7) / 8` to satisfy `clippy::manual_div_ceil`.

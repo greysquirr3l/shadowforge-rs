@@ -11,3 +11,4 @@ pub mod pdf;
 
 pub mod opsec;
 pub mod stego;
+pub mod timelock;
