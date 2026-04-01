@@ -1,11 +1,11 @@
 //! Operational security adapters implementing emergency wipe and amnesiac operations.
 
 use crate::domain::errors::OpsecError;
-use crate::domain::ports::PanicWiper;
+use crate::domain::ports::{AmnesiaPipeline, EmbedTechnique, PanicWiper};
 use crate::domain::types::PanicWipeConfig;
 use rand::Rng;
 use std::fs::{self, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// Secure panic wiper using a 3-pass overwrite-then-delete strategy.
@@ -203,6 +203,38 @@ impl PanicWiper for SecurePanicWiper {
     }
 }
 
+/// In-memory amnesiac pipeline adapter.
+///
+/// Delegates to [`crate::domain::opsec::embed_in_memory`] to ensure
+/// zero filesystem writes during the embed/extract cycle.
+pub struct AmnesiaPipelineImpl;
+
+impl AmnesiaPipelineImpl {
+    /// Create a new amnesiac pipeline adapter.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for AmnesiaPipelineImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AmnesiaPipeline for AmnesiaPipelineImpl {
+    fn embed_in_memory(
+        &self,
+        payload_input: &mut dyn Read,
+        cover_input: &mut dyn Read,
+        output: &mut dyn Write,
+        technique: &dyn EmbedTechnique,
+    ) -> Result<(), OpsecError> {
+        crate::domain::opsec::embed_in_memory(payload_input, cover_input, output, technique)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,5 +399,66 @@ mod tests {
 
         // File should be gone
         assert!(!file_path.exists());
+    }
+
+    // ─── AmnesiaPipeline Tests ────────────────────────────────────────────
+
+    use crate::domain::errors::StegoError;
+    use crate::domain::types::{Capacity, CoverMedia, Payload, StegoTechnique};
+    use bytes::Bytes;
+    use std::io::Cursor;
+
+    struct MockEmbedder;
+
+    impl crate::domain::ports::EmbedTechnique for MockEmbedder {
+        fn technique(&self) -> StegoTechnique {
+            StegoTechnique::LsbImage
+        }
+
+        fn capacity(&self, cover: &CoverMedia) -> Result<Capacity, StegoError> {
+            Ok(Capacity {
+                bytes: cover.data.len() as u64,
+                technique: StegoTechnique::LsbImage,
+            })
+        }
+
+        fn embed(&self, cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
+            let mut combined = cover.data.to_vec();
+            combined.extend_from_slice(payload.as_bytes());
+            Ok(CoverMedia {
+                kind: cover.kind,
+                data: Bytes::from(combined),
+                metadata: cover.metadata,
+            })
+        }
+    }
+
+    #[test]
+    fn amnesiac_adapter_embed_roundtrip() {
+        let pipeline = AmnesiaPipelineImpl::new();
+        let mut cover = Cursor::new(b"img-data".to_vec());
+        let mut payload = Cursor::new(b"secret".to_vec());
+        let mut output = Vec::new();
+
+        pipeline
+            .embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)
+            .expect("embed via adapter");
+
+        assert!(output.starts_with(b"img-data"));
+        assert!(output.ends_with(b"secret"));
+    }
+
+    #[test]
+    fn amnesiac_adapter_default() {
+        let pipeline = AmnesiaPipelineImpl::default();
+        let mut cover = Cursor::new(b"c".to_vec());
+        let mut payload = Cursor::new(b"p".to_vec());
+        let mut output = Vec::new();
+
+        pipeline
+            .embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)
+            .expect("embed via default adapter");
+
+        assert!(!output.is_empty());
     }
 }

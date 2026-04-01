@@ -149,7 +149,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T26 — Amnesiac mode: zero-disk-write in-memory pipeline via std::io::pipe | `[ ]` | |
+| T26 — Amnesiac mode: zero-disk-write in-memory pipeline via `std::io::pipe` | `[x]` | 6 tests (4 domain + 2 adapter), embed_in_memory with zeroize on intermediates |
 | T27 — Geographic threshold distribution manifests | `[ ]` | |
 | T28 — Forensic watermark tripwires for distribution leak identification | `[ ]` | |
 
