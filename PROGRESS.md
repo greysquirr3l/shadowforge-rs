@@ -106,8 +106,8 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T19 — Dual-payload deniable steganography | `[ ]` | |
-| T20 — Panic wipe: emergency secure erasure of all key material | `[ ]` | |
+| T19 — Dual-payload deniable steganography | `[x]` | |
+| T20 — Panic wipe: emergency secure erasure of all key material | `[x]` | |
 
 ---
 
@@ -273,3 +273,9 @@
 - T16: Permutation search for detectability minimization needs validation against real steganalysis tools (Aletheia, StegExpose).
 - T17: Camera model fingerprint matching requires extracting and matching JPEG quantization table signatures.
 - T18: Compression-survivable embedding requires modeling platform-specific recompression algorithms (Instagram, Twitter, Facebook).
+- T19: Channel-separated dual-payload embedding (even/odd bit indices) prevents pattern overlap between primary and decoy payloads.
+- T19: PRNG pattern generation must not sort indices after truncation — sorting N vs M indices produces different orderings, breaking deterministic extraction.
+- T19: Zero-length payloads must be rejected during extraction to avoid false positives from garbage headers in wrong channels.
+- T19: Channel tag in seed derivation (SHA256(key || channel)) ensures primary and decoy keys map to non-overlapping bit positions.
+- T20: `rand 0.10` replaced `thread_rng()` with `rng()` and `RngCore` must be imported as `rand::Rng` (not `rand::RngCore`).
+- T20: Adapter modules must be exported in `adapters/mod.rs` — easy to forget when the file exists but the `pub mod` declaration is missing.
