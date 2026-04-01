@@ -129,7 +129,7 @@
 | Task | Status | Notes |
 | --- | --- | --- |
 | T23 — Time-lock puzzle payloads using Rivest iterated hash chains | `[x]` | |
-| T24 — Linguistic stylometric fingerprint scrubbing | `[ ]` | |
+| T24 — Linguistic stylometric fingerprint scrubbing | `[~]` | |
 
 ---
 

@@ -10,5 +10,6 @@ pub mod media;
 pub mod pdf;
 
 pub mod opsec;
+pub mod scrubber;
 pub mod stego;
 pub mod timelock;
