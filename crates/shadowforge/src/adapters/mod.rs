@@ -1,6 +1,7 @@
 //! Infrastructure adapters implementing domain port traits.
 
 pub mod canary;
+pub mod corpus;
 pub mod correction;
 pub mod crypto;
 pub mod deadrop;

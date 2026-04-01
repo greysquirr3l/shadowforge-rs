@@ -129,7 +129,7 @@
 | Task | Status | Notes |
 | --- | --- | --- |
 | T23 — Time-lock puzzle payloads using Rivest iterated hash chains | `[x]` | |
-| T24 — Linguistic stylometric fingerprint scrubbing | `[~]` | |
+| T24 — Linguistic stylometric fingerprint scrubbing | `[x]` | 15 tests (10 domain + 5 adapter), punctuation normalisation, contraction expansion, whitespace collapse |
 
 ---
 
@@ -139,7 +139,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T25 — Zero-modification corpus steganography via ANN cover selection | `[ ]` | |
+| T25 — Zero-modification corpus steganography via ANN cover selection | `[x]` | 21 tests (14 domain + 7 adapter), Hamming distance, LSB extraction, linear ANN scan |
 
 ---
 
