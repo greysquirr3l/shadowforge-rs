@@ -55,11 +55,12 @@ impl DeadDropEncoder for DeadDropEncoderImpl {
         // For lossy platforms (Instagram, Twitter, etc.), the caller should
         // provide a compression-survivable embedder (T18) — this adapter
         // delegates the strategy choice to the caller.
-        let stego_cover = technique
-            .embed(cover, payload)
-            .map_err(|e| DeadDropError::EncodeFailed {
-                reason: format!("embedding failed for platform {platform:?}: {e}"),
-            })?;
+        let stego_cover =
+            technique
+                .embed(cover, payload)
+                .map_err(|e| DeadDropError::EncodeFailed {
+                    reason: format!("embedding failed for platform {platform:?}: {e}"),
+                })?;
 
         Ok(stego_cover)
     }
@@ -125,12 +126,8 @@ mod tests {
             fail_embed: false,
         };
 
-        let result = encoder.encode_for_platform(
-            cover,
-            &payload,
-            &PlatformProfile::Telegram,
-            &mock,
-        );
+        let result =
+            encoder.encode_for_platform(cover, &payload, &PlatformProfile::Telegram, &mock);
 
         assert!(result.is_ok());
         let stego = result.expect("should succeed");
@@ -148,12 +145,8 @@ mod tests {
             fail_embed: false,
         };
 
-        let result = encoder.encode_for_platform(
-            cover,
-            &payload,
-            &PlatformProfile::Instagram,
-            &mock,
-        );
+        let result =
+            encoder.encode_for_platform(cover, &payload, &PlatformProfile::Instagram, &mock);
 
         assert!(result.is_ok());
     }
@@ -168,12 +161,7 @@ mod tests {
             fail_embed: false,
         };
 
-        let result = encoder.encode_for_platform(
-            cover,
-            &payload,
-            &PlatformProfile::Twitter,
-            &mock,
-        );
+        let result = encoder.encode_for_platform(cover, &payload, &PlatformProfile::Twitter, &mock);
 
         assert!(matches!(result, Err(DeadDropError::EncodeFailed { .. })));
     }
@@ -188,12 +176,7 @@ mod tests {
             fail_embed: true,
         };
 
-        let result = encoder.encode_for_platform(
-            cover,
-            &payload,
-            &PlatformProfile::Imgur,
-            &mock,
-        );
+        let result = encoder.encode_for_platform(cover, &payload, &PlatformProfile::Imgur, &mock);
 
         assert!(matches!(result, Err(DeadDropError::EncodeFailed { .. })));
     }
