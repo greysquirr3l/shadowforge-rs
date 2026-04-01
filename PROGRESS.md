@@ -117,7 +117,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T21 — Canary shard tripwires for K-of-N distribution compromise detection | `[ ]` | |
+| T21 — Canary shard tripwires for K-of-N distribution compromise detection | `[x]` | |
 | T22 — Dead drop mode: platform-aware cover generation for public posting | `[ ]` | |
 
 ---
@@ -279,3 +279,7 @@
 - T19: Channel tag in seed derivation (SHA256(key || channel)) ensures primary and decoy keys map to non-overlapping bit positions.
 - T20: `rand 0.10` replaced `thread_rng()` with `rng()` and `RngCore` must be imported as `rand::Rng` (not `rand::RngCore`).
 - T20: Adapter modules must be exported in `adapters/mod.rs` — easy to forget when the file exists but the `pub mod` declaration is missing.
+- T21: `EmbedTechnique::embed()` consumes the `CoverMedia` — if embedding fails, the cover is gone. Plan control flow accordingly.
+- T21: `StegoError::PayloadTooLarge` uses field `needed` (not `required`).
+- T21: `CoverMediaKind::PngImage` (not `Png`) — enum variants use full descriptive names.
+- T21: clippy `similar_names` flags `embedded` vs `embedder` — rename to `placed` or similar.
