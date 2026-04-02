@@ -1,27 +1,69 @@
+# ─── Rust ──────────────────────────────────────────────────────────────────────
 /target/
-Cargo.lock
-*.key
-*.stego
-shadowforge-rs-seed.tar.gz
-shadowforge-rs/
-coverage/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock — committed for binaries, not libraries. We are a binary.
+# Cargo.lock
+
+# ─── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+*.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+
+# ─── Windows ───────────────────────────────────────────────────────────────────
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ─── GitHub / CI ───────────────────────────────────────────────────────────────
+
+# ─── IDE / Editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Agent / Tool State ───────────────────────────────────────────────────────
 .coraline/
 .claude/
 .serena/
-.vscode/
+
+# ─── Project-Specific ─────────────────────────────────────────────────────────
+*.key
+*.pub
+*.stego
+*.puzzle
+*.receipt.md
+shadowforge-rs-seed.tar.gz
+shadowforge-rs/
+completions/
+.env
+.env.local
+/corpus-index/
+
+# ─── Coverage ──────────────────────────────────────────────────────────────────
+/coverage/
+coverage/
+*.profraw
+*.profdata
+tarpaulin-report.html
+lcov.info
+
+# ─── Internal Docs / Planning ─────────────────────────────────────────────────
 IMPLEMENTATION_PLAN.md
+plan.toml
 PROGRESS.md
 rust-catchup-1.78-1.94.1.md
 tasks/
 CLAUDE.md
-
-/coverage/
-# Cargo.lock      # not committed for libraries; committed for binaries — we are a binary
-*.pub
-*.puzzle
-*.receipt.md
-completions/
-.env
-.env.local
-*.DS_Store
-/corpus-index/
