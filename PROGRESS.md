@@ -162,7 +162,7 @@
 | Task | Status | Notes |
 | --- | --- | --- |
 | T29 — Four distribution patterns: 1:1, 1:N, N:1, N:M — with canary and geographic support | `[x]` | |
-| T30 — K-of-N shard reconstruction with full verification chain | `[ ]` | |
+| T30 — K-of-N shard reconstruction with full verification chain | `[x]` | |
 
 ---
 
