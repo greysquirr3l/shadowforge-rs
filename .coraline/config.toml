@@ -1,0 +1,52 @@
+# Coraline project configuration
+# All settings are optional — defaults are shown below.
+
+[indexing]
+max_file_size = 1048576   # 1 MB
+batch_size    = 100
+include_patterns = [
+  "**/*.rs", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx",
+  "**/*.py", "**/*.go", "**/*.java", "**/*.cs", "**/*.cpp",
+  "**/*.c", "**/*.h", "**/*.rb", "**/*.php", "**/*.swift",
+  "**/*.kt", "**/*.razor",
+]
+exclude_patterns = [
+  "**/.git/**", "**/target/**", "**/node_modules/**",
+  "**/dist/**", "**/build/**", "**/.coraline/**",
+  # Python virtualenvs — covers .venv/, venv/, env/, and named venvs
+  # like cluster_venv/, memory_venv/, project-venv/, etc.
+  "**/.venv/**", "**/venv/**", "**/*_venv/**", "**/*-venv/**",
+  "**/env/**", "**/.env/**", "**/__pycache__/**",
+]
+
+[context]
+max_nodes          = 20
+max_code_blocks    = 5
+max_code_block_size = 1500
+traversal_depth    = 1
+
+[sync]
+git_hooks_enabled = true
+watch_mode        = false
+debounce_ms       = 500
+
+[vectors]
+# Full vector search requires an ONNX model.
+# Download any variant from huggingface.co/nomic-ai/nomic-embed-text-v1.5
+# (also copy tokenizer.json) into the directory below:
+#   model_int8.onnx      137 MB  — int8 quantized (recommended)
+#   model_quantized.onnx 137 MB  — same as int8
+#   model_uint8.onnx     137 MB  — uint8 quantized
+#   model_q4f16.onnx     111 MB  — smallest (Q4 + fp16)
+#   model_q4.onnx        165 MB  — Q4 quantized
+#   model_fp16.onnx      274 MB  — fp16
+#   model.onnx           547 MB  — full f32
+# Coraline auto-selects the best available file; set model_file to override.
+# Then run: coraline embed
+enabled    = false
+model      = "nomic-embed-text-v1.5"
+dimension  = 768
+batch_size = 32
+max_seq_len = 512
+# model_dir  = ".coraline/models/nomic-embed-text-v1.5"  # override default path
+# model_file = "model_int8.onnx"                          # pin a specific variant
