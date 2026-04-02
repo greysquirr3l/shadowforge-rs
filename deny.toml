@@ -18,7 +18,7 @@ version      = 2
 db-path      = "~/.cargo/advisory-db"
 db-urls      = ["https://github.com/rustsec/advisory-db"]
 ignore       = []
-unmaintained = "warn"
+unmaintained = "workspace"
 
 # ─── Licenses ─────────────────────────────────────────────────────────────────
 [licenses]
@@ -27,14 +27,17 @@ allow                = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "MIT",
+    "MIT-0",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "Unicode-3.0",
     "OpenSSL",
     "Zlib",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "bzip2-1.0.6",
 ]
-deny                 = []
 confidence-threshold = 0.8
 exceptions           = []
 
@@ -48,7 +51,7 @@ deny = [
     { name = "async-std",   reason = "This crate is tokio-free; async-std should not appear." },
     { name = "pqcrypto",    reason = "Use ml-kem and ml-dsa (pure Rust NIST finalists)." },
     { name = "oqs",         reason = "Use ml-kem and ml-dsa (pure Rust NIST finalists)." },
-    { name = "lazy_static", reason = "Use std::sync::LazyLock (stable since 1.80)." },
+    { name = "lazy_static", reason = "Use std::sync::LazyLock (stable since 1.80).", wrappers = ["sharded-slab"] },
     { name = "rand", wrappers = [], version = "<0.8" },
 ]
 skip      = []

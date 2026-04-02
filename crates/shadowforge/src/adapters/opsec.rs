@@ -147,25 +147,11 @@ impl SecurePanicWiper {
             let entry_path = entry.path();
 
             if entry_path.is_dir() {
-                // Recursively wipe subdirectory
-                if let Err(e) = Self::wipe_dir_recursive(&entry_path) {
-                    eprintln!(
-                        "Warning: failed to wipe subdirectory {}: {}",
-                        entry_path.display(),
-                        e
-                    );
-                    // Continue to next entry
-                }
+                // Recursively wipe subdirectory (errors silently ignored
+                // to avoid leaking paths to stderr during wipe)
+                let _ = Self::wipe_dir_recursive(&entry_path);
             } else {
-                // Wipe file
-                if let Err(e) = Self::wipe_file(&entry_path) {
-                    eprintln!(
-                        "Warning: failed to wipe file {}: {}",
-                        entry_path.display(),
-                        e
-                    );
-                    // Continue to next entry
-                }
+                let _ = Self::wipe_file(&entry_path);
             }
         }
 
@@ -186,10 +172,9 @@ impl PanicWiper for SecurePanicWiper {
     fn wipe(&self, config: &PanicWipeConfig) -> Result<(), OpsecError> {
         let mut failures = Vec::new();
 
-        // Wipe all key files
+        // Wipe all key files — never print paths to stderr (opsec).
         for path in &config.key_paths {
             if let Err(e) = Self::wipe_file(path) {
-                eprintln!("Failed to wipe key file {}: {}", path.display(), e);
                 failures.push((path.display().to_string(), e));
             }
         }
@@ -197,7 +182,6 @@ impl PanicWiper for SecurePanicWiper {
         // Wipe all config files
         for path in &config.config_paths {
             if let Err(e) = Self::wipe_file(path) {
-                eprintln!("Failed to wipe config file {}: {}", path.display(), e);
                 failures.push((path.display().to_string(), e));
             }
         }
@@ -205,7 +189,6 @@ impl PanicWiper for SecurePanicWiper {
         // Wipe all temp directories
         for path in &config.temp_dirs {
             if let Err(e) = Self::wipe_dir_recursive(path) {
-                eprintln!("Failed to wipe temp directory {}: {}", path.display(), e);
                 failures.push((path.display().to_string(), e));
             }
         }
