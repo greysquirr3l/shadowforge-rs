@@ -9,6 +9,10 @@ use crate::domain::errors::ArchiveError;
 use crate::domain::ports::ArchiveHandler;
 use crate::domain::types::ArchiveFormat;
 
+/// Maximum decompressed size per archive entry (256 MiB).
+/// Prevents zip-bomb / tar-bomb `DoS` from exhausting memory.
+const MAX_ENTRY_SIZE: u64 = 256 * 1024 * 1024;
+
 /// Concrete [`ArchiveHandler`] implementation using in-memory buffers.
 pub struct ArchiveHandlerImpl;
 
@@ -164,7 +168,7 @@ fn unpack_zip(archive: &[u8]) -> Result<Vec<(String, Bytes)>, ArchiveError> {
 
     let mut entries = Vec::new();
     for i in 0..reader.len() {
-        let mut file = reader.by_index(i).map_err(|e| ArchiveError::UnpackFailed {
+        let file = reader.by_index(i).map_err(|e| ArchiveError::UnpackFailed {
             reason: e.to_string(),
         })?;
         if file.is_dir() {
@@ -172,7 +176,8 @@ fn unpack_zip(archive: &[u8]) -> Result<Vec<(String, Bytes)>, ArchiveError> {
         }
         let name = file.name().to_string();
         let mut data = Vec::new();
-        file.read_to_end(&mut data)
+        file.take(MAX_ENTRY_SIZE)
+            .read_to_end(&mut data)
             .map_err(|e| ArchiveError::UnpackFailed {
                 reason: e.to_string(),
             })?;
@@ -202,6 +207,8 @@ fn unpack_tar(archive: &[u8]) -> Result<Vec<(String, Bytes)>, ArchiveError> {
             .to_string();
         let mut data = Vec::new();
         entry
+            .by_ref()
+            .take(MAX_ENTRY_SIZE)
             .read_to_end(&mut data)
             .map_err(|e| ArchiveError::UnpackFailed {
                 reason: e.to_string(),
@@ -235,6 +242,8 @@ fn unpack_tar_gz(archive: &[u8]) -> Result<Vec<(String, Bytes)>, ArchiveError> {
             .to_string();
         let mut data = Vec::new();
         entry
+            .by_ref()
+            .take(MAX_ENTRY_SIZE)
             .read_to_end(&mut data)
             .map_err(|e| ArchiveError::UnpackFailed {
                 reason: e.to_string(),

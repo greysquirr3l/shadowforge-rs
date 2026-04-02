@@ -260,6 +260,10 @@ pub struct EmbedDistributedArgs {
     /// Geographic manifest TOML path.
     #[arg(long)]
     pub geo_manifest: Option<PathBuf>,
+    /// Path to a 32-byte HMAC key for shard integrity. If omitted, a random
+    /// key is generated and written next to the output archive.
+    #[arg(long)]
+    pub hmac_key: Option<PathBuf>,
 }
 
 /// Arguments for `extract-distributed`.
@@ -280,6 +284,9 @@ pub struct ExtractDistributedArgs {
     /// Number of parity shards in the original distribution.
     #[arg(long, default_value = "2")]
     pub parity_shards: u8,
+    /// Path to the 32-byte HMAC key used during distribution.
+    #[arg(long)]
+    pub hmac_key: Option<PathBuf>,
 }
 
 /// Arguments for `analyse`.

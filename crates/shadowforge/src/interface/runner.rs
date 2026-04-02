@@ -3,6 +3,9 @@
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+/// Maximum payload size accepted from stdin (256 MiB).
+const MAX_STDIN_PAYLOAD: u64 = 256 * 1024 * 1024;
+
 use clap::Parser;
 
 use crate::application::services::{
@@ -176,11 +179,13 @@ fn cmd_extract(args: &cli::ExtractArgs) -> Result<(), AppError> {
 
     if args.amnesia {
         let mut buf = Vec::new();
-        io::stdin().lock().read_to_end(&mut buf).map_err(|e| {
-            crate::domain::errors::StegoError::MalformedCoverData {
+        io::stdin()
+            .lock()
+            .take(MAX_STDIN_PAYLOAD)
+            .read_to_end(&mut buf)
+            .map_err(|e| crate::domain::errors::StegoError::MalformedCoverData {
                 reason: format!("stdin read: {e}"),
-            }
-        })?;
+            })?;
         let cover = load_cover(technique, &buf);
         let payload = ExtractService::extract(&cover, extractor.as_ref())?;
         io::stdout().write_all(payload.as_bytes()).map_err(|e| {
@@ -218,7 +223,11 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     let covers = covers?;
 
     let profile = resolve_profile(args.profile, args.platform);
-    let distributor = crate::adapters::distribution::DistributorImpl;
+    let hmac_key = match &args.hmac_key {
+        Some(p) => fs_read(p)?,
+        None => crate::adapters::distribution::DistributorImpl::generate_hmac_key(),
+    };
+    let distributor = crate::adapters::distribution::DistributorImpl::new(hmac_key.clone());
 
     let stego_covers = crate::application::services::DistributeService::distribute(
         &payload,
@@ -244,6 +253,12 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
         &handler,
     )?;
     fs_write(&args.output_archive, &archive)?;
+    // Persist HMAC key so extract-distributed can use it
+    if args.hmac_key.is_none() {
+        let key_path = args.output_archive.with_extension("hmac");
+        fs_write(&key_path, &hmac_key)?;
+        eprintln!("HMAC key written to {}", key_path.display());
+    }
     eprintln!(
         "Distributed into {} shards → {}",
         stego_covers.len(),
@@ -271,10 +286,17 @@ fn cmd_extract_distributed(args: &cli::ExtractDistributedArgs) -> Result<(), App
         .map(|(_, data)| load_cover(technique, data))
         .collect();
 
+    let hmac_key = if let Some(p) = &args.hmac_key {
+        fs_read(p)?
+    } else {
+        // Try the default location next to the archive
+        let default_path = args.input_archive.with_extension("hmac");
+        fs_read(&default_path)?
+    };
     let reconstructor = crate::adapters::reconstruction::ReconstructorImpl::new(
         args.data_shards,
         args.parity_shards,
-        Vec::new(),
+        hmac_key,
         0,
     );
     let payload = crate::application::services::ReconstructService::reconstruct(

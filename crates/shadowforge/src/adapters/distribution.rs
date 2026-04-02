@@ -7,19 +7,37 @@ use crate::domain::ports::{Distributor, EmbedTechnique};
 use crate::domain::types::{CoverMedia, DistributionPattern, EmbeddingProfile, Payload};
 
 /// Concrete [`Distributor`] implementation.
-pub struct DistributorImpl;
+pub struct DistributorImpl {
+    /// HMAC key for shard integrity tags.
+    hmac_key: Vec<u8>,
+}
 
 impl Default for DistributorImpl {
     fn default() -> Self {
-        Self
+        Self::new(Self::generate_hmac_key())
     }
 }
 
 impl DistributorImpl {
-    /// Create a new distributor.
+    /// Create a new distributor with the given HMAC key.
     #[must_use]
-    pub const fn new() -> Self {
-        Self
+    pub const fn new(hmac_key: Vec<u8>) -> Self {
+        Self { hmac_key }
+    }
+
+    /// Generate a random 32-byte HMAC key.
+    #[must_use]
+    pub fn generate_hmac_key() -> Vec<u8> {
+        use rand::Rng;
+        let mut key = vec![0u8; 32];
+        rand::rng().fill_bytes(&mut key);
+        key
+    }
+
+    /// Return a reference to the HMAC key used for shard integrity.
+    #[must_use]
+    pub fn hmac_key(&self) -> &[u8] {
+        &self.hmac_key
     }
 }
 
@@ -39,7 +57,14 @@ impl Distributor for DistributorImpl {
             DistributionPattern::OneToMany {
                 data_shards,
                 parity_shards,
-            } => distribute_one_to_many(payload, covers, embedder, data_shards, parity_shards),
+            } => distribute_one_to_many(
+                payload,
+                covers,
+                embedder,
+                data_shards,
+                parity_shards,
+                &self.hmac_key,
+            ),
             DistributionPattern::ManyToOne => {
                 // For ManyToOne called via the trait with a single payload,
                 // just embed directly (multi-payload packing is done upstream).
@@ -105,10 +130,10 @@ fn distribute_one_to_many(
     embedder: &dyn EmbedTechnique,
     data_shards: u8,
     parity_shards: u8,
+    hmac_key: &[u8],
 ) -> Result<Vec<CoverMedia>, DistributionError> {
     use crate::domain::correction::encode_shards;
 
-    let hmac_key = b"distribution-hmac-key"; // TODO(T33): derive from session key
     let shards = encode_shards(payload.as_bytes(), data_shards, parity_shards, hmac_key)
         .map_err(|source| DistributionError::CorrectionFailed { source })?;
 
@@ -222,7 +247,7 @@ mod tests {
 
     #[test]
     fn one_to_one_round_trip() -> TestResult {
-        let distributor = DistributorImpl::new();
+        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec());
         let payload = Payload::from_bytes(b"secret message".to_vec());
         let covers = vec![make_cover(128)];
         let result =
@@ -248,7 +273,8 @@ mod tests {
         };
         validate_cover_count(&pattern, covers.len())?;
 
-        let result = distribute_one_to_many(&payload, covers, &MockEmbedder, 5, 3)?;
+        let result =
+            distribute_one_to_many(&payload, covers, &MockEmbedder, 5, 3, b"test-hmac-key")?;
         assert_eq!(result.len(), 8);
         // Each cover should have been modified (data extended)
         for cover in &result {
@@ -259,7 +285,7 @@ mod tests {
 
     #[test]
     fn many_to_one_embed_single_cover() -> TestResult {
-        let distributor = DistributorImpl::new();
+        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec());
         let payload = Payload::from_bytes(b"combined payload".to_vec());
         let covers = vec![make_cover(512)];
         let result =
@@ -290,7 +316,7 @@ mod tests {
 
     #[test]
     fn insufficient_covers_returns_error() {
-        let distributor = DistributorImpl::new();
+        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec());
         let payload = Payload::from_bytes(b"test".to_vec());
         let covers: Vec<CoverMedia> = vec![];
         let result =
@@ -364,7 +390,8 @@ mod tests {
     fn distribute_one_to_many_embed_failure() {
         let covers: Vec<CoverMedia> = (0..4).map(|_| make_cover(256)).collect();
         let payload = Payload::from_bytes(vec![0xBB; 32]);
-        let result = distribute_one_to_many(&payload, covers, &FailEmbedder, 3, 1);
+        let result =
+            distribute_one_to_many(&payload, covers, &FailEmbedder, 3, 1, b"test-hmac-key");
         assert!(result.is_err());
     }
 
@@ -383,7 +410,7 @@ mod tests {
 
     #[test]
     fn distribute_default_impl() -> TestResult {
-        let distributor = DistributorImpl;
+        let distributor = DistributorImpl::default();
         let payload = Payload::from_bytes(b"hello".to_vec());
         let covers = vec![make_cover(128)];
         let result =
