@@ -173,7 +173,7 @@
 | Task | Status | Notes |
 | --- | --- | --- |
 | T31 — Capacity estimation and chi-square detectability analysis across all techniques | `[x]` | |
-| T32 — ZIP and TAR/TAR.GZ archive handling with nested archive support | `[ ]` | |
+| T32 — ZIP and TAR/TAR.GZ archive handling with nested archive support | `[x]` | |
 
 ---
 

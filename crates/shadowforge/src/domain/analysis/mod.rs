@@ -2,9 +2,7 @@
 //!
 //! Pure domain logic — no I/O, no file system, no async runtime.
 
-use crate::domain::types::{
-    CoverMedia, CoverMediaKind, DetectabilityRisk, StegoTechnique,
-};
+use crate::domain::types::{CoverMedia, CoverMediaKind, DetectabilityRisk, StegoTechnique};
 
 /// `DetectabilityRisk` thresholds in dB.
 const HIGH_THRESHOLD_DB: f64 = -6.0;
