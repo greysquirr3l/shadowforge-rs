@@ -5,3 +5,11 @@ Cargo.lock
 shadowforge-rs-seed.tar.gz
 shadowforge-rs/
 coverage/
+.coraline/
+.claude/
+.serena/
+.vscode/
+IMPLEMENTATION_PLAN.md
+PROGRESS.md
+rust-catchup-1.78-1.94.1.md
+tasks/
