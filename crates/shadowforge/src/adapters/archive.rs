@@ -4,7 +4,7 @@ use std::io::{Cursor, Read, Write};
 
 use bytes::Bytes;
 
-use crate::domain::archive::{detect_format, MAX_NESTING_DEPTH};
+use crate::domain::archive::{MAX_NESTING_DEPTH, detect_format};
 use crate::domain::errors::ArchiveError;
 use crate::domain::ports::ArchiveHandler;
 use crate::domain::types::ArchiveFormat;
@@ -27,11 +27,7 @@ impl ArchiveHandlerImpl {
 }
 
 impl ArchiveHandler for ArchiveHandlerImpl {
-    fn pack(
-        &self,
-        files: &[(&str, &[u8])],
-        format: ArchiveFormat,
-    ) -> Result<Bytes, ArchiveError> {
+    fn pack(&self, files: &[(&str, &[u8])], format: ArchiveFormat) -> Result<Bytes, ArchiveError> {
         match format {
             ArchiveFormat::Zip => pack_zip(files),
             ArchiveFormat::Tar => pack_tar(files),
@@ -61,9 +57,11 @@ fn pack_zip(files: &[(&str, &[u8])]) -> Result<Bytes, ArchiveError> {
             .map_err(|e| ArchiveError::PackFailed {
                 reason: e.to_string(),
             })?;
-        writer.write_all(data).map_err(|e| ArchiveError::PackFailed {
-            reason: e.to_string(),
-        })?;
+        writer
+            .write_all(data)
+            .map_err(|e| ArchiveError::PackFailed {
+                reason: e.to_string(),
+            })?;
     }
 
     let cursor = writer.finish().map_err(|e| ArchiveError::PackFailed {

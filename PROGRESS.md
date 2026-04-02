@@ -183,7 +183,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T33 — Use-case orchestrators for all services including nation-state countermeasures | `[ ]` | |
+| T33 — Use-case orchestrators for all services including nation-state countermeasures | `[x]` | |
 
 ---
 
