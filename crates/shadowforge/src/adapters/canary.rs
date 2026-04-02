@@ -111,6 +111,8 @@ mod tests {
     use bytes::Bytes;
     use std::collections::HashMap;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     /// A mock embedder for testing canary embedding.
     struct MockEmbedder {
         capacity_bytes: u64,
@@ -157,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn embed_canary_returns_canary_shard() {
+    fn embed_canary_returns_canary_shard() -> TestResult {
         let service = CanaryServiceImpl::new(64, 5);
         let embedder = MockEmbedder {
             capacity_bytes: 1024,
@@ -167,12 +169,13 @@ mod tests {
 
         let (result_covers, canary) = service
             .embed_canary(covers, &embedder)
-            .expect("embed should succeed");
+            ?;
 
         assert_eq!(result_covers.len(), 1);
         assert_eq!(canary.shard.data.len(), 64);
         assert_eq!(canary.shard.index, 5); // total_shards = 5, so canary index = 5
-    }
+        Ok(())
+}
 
     #[test]
     fn embed_canary_fails_on_empty_covers() {
@@ -200,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn embed_canary_skips_failing_cover_tries_next() {
+    fn embed_canary_skips_failing_cover_tries_next() -> TestResult {
         let service = CanaryServiceImpl::new(64, 5);
         // First cover will fail embedding, second should succeed
         let embedder = MockEmbedder {
@@ -211,14 +214,15 @@ mod tests {
 
         let (result_covers, canary) = service
             .embed_canary(covers, &embedder)
-            .expect("embed should succeed on second cover");
+            ?;
 
         assert_eq!(result_covers.len(), 2);
         assert!(!canary.shard.data.is_empty());
-    }
+        Ok(())
+}
 
     #[test]
-    fn canary_shard_not_in_original_covers() {
+    fn canary_shard_not_in_original_covers() -> TestResult {
         let service = CanaryServiceImpl::new(64, 5);
         let embedder = MockEmbedder {
             capacity_bytes: 1024,
@@ -230,11 +234,12 @@ mod tests {
 
         let (result_covers, _canary) = service
             .embed_canary(covers, &embedder)
-            .expect("embed should succeed");
+            ?;
 
         // Modified cover should differ from original
-        assert_ne!(result_covers[0].data, original_data);
-    }
+        assert_ne!(result_covers.first().ok_or("index out of bounds")?.data, original_data);
+        Ok(())
+}
 
     #[test]
     fn check_canary_returns_false_without_notify_url() {

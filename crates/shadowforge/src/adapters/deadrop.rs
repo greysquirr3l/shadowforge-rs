@@ -74,6 +74,8 @@ mod tests {
     use bytes::Bytes;
     use std::collections::HashMap;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     struct MockEmbedder {
         cap: u64,
         fail_embed: bool,
@@ -117,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn encode_for_telegram_succeeds() {
+    fn encode_for_telegram_succeeds() -> TestResult {
         let encoder = DeadDropEncoderImpl::new();
         let cover = make_cover();
         let payload = Payload::from_bytes(vec![1, 2, 3, 4]);
@@ -130,10 +132,11 @@ mod tests {
             encoder.encode_for_platform(cover, &payload, &PlatformProfile::Telegram, &mock);
 
         assert!(result.is_ok());
-        let stego = result.expect("should succeed");
+        let stego = result?;
         // Stego cover should be larger (payload appended by mock)
         assert!(stego.data.len() > 512);
-    }
+        Ok(())
+}
 
     #[test]
     fn encode_for_instagram_succeeds() {

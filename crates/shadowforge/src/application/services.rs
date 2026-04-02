@@ -468,6 +468,8 @@ mod tests {
     use crate::domain::types::{Capacity, CoverMediaKind};
     use std::collections::HashMap;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     // ─── Mock Embedder / Extractor ────────────────────────────────────────
 
     struct MockEmbedder;
@@ -513,16 +515,17 @@ mod tests {
                 return Err(StegoError::NoPayloadFound);
             }
             let offset = self.cover_prefix_len;
-            let len_bytes: [u8; 4] = data[offset..offset + 4]
+            let len_bytes: [u8; 4] = data
+                .get(offset..offset + 4)
+                .ok_or(StegoError::NoPayloadFound)?
                 .try_into()
                 .map_err(|_| StegoError::NoPayloadFound)?;
-            #[expect(clippy::cast_possible_truncation, reason = "test data < 4 GiB")]
             let len = u32::from_le_bytes(len_bytes) as usize;
             let start = offset + 4;
-            if start + len > data.len() {
-                return Err(StegoError::NoPayloadFound);
-            }
-            Ok(Payload::from_bytes(data[start..start + len].to_vec()))
+            let payload_data = data
+                .get(start..start + len)
+                .ok_or(StegoError::NoPayloadFound)?;
+            Ok(Payload::from_bytes(payload_data.to_vec()))
         }
     }
 
@@ -537,7 +540,7 @@ mod tests {
     // ─── Embed + Extract ──────────────────────────────────────────────────
 
     #[test]
-    fn embed_extract_round_trip() {
+    fn embed_extract_round_trip() -> TestResult {
         let cover = make_cover(128);
         let payload = Payload::from_bytes(b"secret message".to_vec());
         let embedder = MockEmbedder;
@@ -545,15 +548,16 @@ mod tests {
             cover_prefix_len: 128,
         };
 
-        let stego = EmbedService::embed(cover, &payload, &embedder).expect("embed");
-        let extracted = ExtractService::extract(&stego, &extractor).expect("extract");
+        let stego = EmbedService::embed(cover, &payload, &embedder)?;
+        let extracted = ExtractService::extract(&stego, &extractor)?;
         assert_eq!(extracted.as_bytes(), b"secret message");
+        Ok(())
     }
 
     // ─── Analyse ──────────────────────────────────────────────────────────
 
     #[test]
-    fn analyse_returns_report() {
+    fn analyse_returns_report() -> TestResult {
         let data: Vec<u8> = (0..=255).cycle().take(8192).collect();
         let cover = CoverMedia {
             kind: CoverMediaKind::PngImage,
@@ -561,38 +565,41 @@ mod tests {
             metadata: HashMap::new(),
         };
         let analyser = crate::adapters::analysis::CapacityAnalyserImpl::new();
-        let report =
-            AnalyseService::analyse(&cover, StegoTechnique::LsbImage, &analyser).expect("analyse");
+        let report = AnalyseService::analyse(&cover, StegoTechnique::LsbImage, &analyser)?;
         assert!(report.cover_capacity.bytes > 0);
+        Ok(())
     }
 
     // ─── Scrub ────────────────────────────────────────────────────────────
 
     #[test]
-    fn scrub_service_normalises_text() {
-        let scrubber = crate::adapters::scrubber::StyloScrubberImpl::new();
+    fn scrub_service_normalises_text() -> TestResult {
+        let stylo_scrubber = crate::adapters::scrubber::StyloScrubberImpl::new();
         let profile = StyloProfile {
             normalize_punctuation: true,
             target_avg_sentence_len: 15.0,
             target_vocab_size: 1000,
         };
-        let scrubbed =
-            ScrubService::scrub("He  can't   stop!!!", &profile, &scrubber).expect("scrub");
+        let scrubbed = ScrubService::scrub("He  can't   stop!!!", &profile, &stylo_scrubber)?;
         assert!(!scrubbed.contains("  "));
         assert!(scrubbed.contains("cannot"));
+        Ok(())
     }
 
     // ─── Archive ──────────────────────────────────────────────────────────
 
     #[test]
-    fn archive_service_round_trip() {
+    fn archive_service_round_trip() -> TestResult {
         let handler = crate::adapters::archive::ArchiveHandlerImpl::new();
         let files = vec![("test.txt", b"data" as &[u8])];
-        let packed = ArchiveService::pack(&files, ArchiveFormat::Zip, &handler).expect("pack");
-        let unpacked =
-            ArchiveService::unpack(&packed, ArchiveFormat::Zip, &handler).expect("unpack");
+        let packed = ArchiveService::pack(&files, ArchiveFormat::Zip, &handler)?;
+        let unpacked = ArchiveService::unpack(&packed, ArchiveFormat::Zip, &handler)?;
         assert_eq!(unpacked.len(), 1);
-        assert_eq!(unpacked[0].1.as_ref(), b"data");
+        assert_eq!(
+            unpacked.first().ok_or("index out of bounds")?.1.as_ref(),
+            b"data"
+        );
+        Ok(())
     }
 
     // ─── AppError wraps all domain errors ─────────────────────────────────

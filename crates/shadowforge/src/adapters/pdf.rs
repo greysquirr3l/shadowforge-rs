@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::io::BufWriter;
 use std::path::Path;
 
-use base64::engine::general_purpose;
 use base64::Engine;
+use base64::engine::general_purpose;
 use bytes::Bytes;
 use image::{DynamicImage, ImageFormat};
-use lopdf::{dictionary, Document, Object};
+use lopdf::{Document, Object, dictionary};
 use pdfium_render::prelude::*;
 
 use crate::domain::errors::PdfError;
@@ -105,15 +105,19 @@ impl PdfProcessor for PdfProcessorImpl {
 
         // Render each page
         for page_index in 0..page_count {
-            let page = document.pages().get(page_index).map_err(|e| {
-                PdfError::RenderFailed {
+            let page = document
+                .pages()
+                .get(page_index)
+                .map_err(|e| PdfError::RenderFailed {
                     page: page_index as usize,
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
 
             // Render to bitmap
-            #[expect(clippy::cast_possible_truncation, reason = "DPI calculation for render")]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "DPI calculation for render"
+            )]
             let target_width = (page.width().value * f32::from(self.dpi) / 72.0) as i32;
 
             let bitmap = page
@@ -128,10 +132,12 @@ impl PdfProcessor for PdfProcessorImpl {
             let height = bitmap.height().cast_unsigned();
             let rgba_data = bitmap.as_rgba_bytes();
 
-            let img = image::RgbaImage::from_raw(width, height, rgba_data.clone())
-                .ok_or_else(|| PdfError::RenderFailed {
-                    page: page_index as usize,
-                    reason: "invalid bitmap dimensions".to_string(),
+            let img =
+                image::RgbaImage::from_raw(width, height, rgba_data.clone()).ok_or_else(|| {
+                    PdfError::RenderFailed {
+                        page: page_index as usize,
+                        reason: "invalid bitmap dimensions".to_string(),
+                    }
                 })?;
 
             // Build metadata
@@ -151,7 +157,10 @@ impl PdfProcessor for PdfProcessorImpl {
         Ok(images)
     }
 
-    #[expect(clippy::too_many_lines, reason = "PDF reconstruction logic is inherently complex")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "PDF reconstruction logic is inherently complex"
+    )]
     fn rebuild_pdf_from_images(
         &self,
         images: Vec<CoverMedia>,
@@ -194,10 +203,7 @@ impl PdfProcessor for PdfProcessorImpl {
             let dynamic_img = DynamicImage::ImageRgba8(img);
             let mut png_bytes = Vec::new();
             dynamic_img
-                .write_to(
-                    &mut std::io::Cursor::new(&mut png_bytes),
-                    ImageFormat::Png,
-                )
+                .write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)
                 .map_err(|e| PdfError::RebuildFailed {
                     reason: e.to_string(),
                 })?;
@@ -347,11 +353,13 @@ impl PdfProcessor for PdfProcessorImpl {
 
                     // Check if token is a number
                     if let Ok(mut num) = token.parse::<i32>() {
-                        // Embed bit in LSB
-                        if payload_bits[bit_index] == 1 {
-                            num |= 1; // Set LSB
-                        } else {
-                            num &= !1; // Clear LSB
+                        // Embed bit in LSB — bit_index < payload_bits.len() guaranteed by guard above
+                        if let Some(&bit) = payload_bits.get(bit_index) {
+                            if bit == 1 {
+                                num |= 1; // Set LSB
+                            } else {
+                                num &= !1; // Clear LSB
+                            }
                         }
                         modified_content.push_str(&num.to_string());
                         bit_index += 1;
@@ -377,9 +385,10 @@ impl PdfProcessor for PdfProcessorImpl {
 
         // Serialize modified PDF
         let mut pdf_bytes = Vec::new();
-        doc.save_to(&mut pdf_bytes).map_err(|e| PdfError::EmbedFailed {
-            reason: e.to_string(),
-        })?;
+        doc.save_to(&mut pdf_bytes)
+            .map_err(|e| PdfError::EmbedFailed {
+                reason: e.to_string(),
+            })?;
 
         Ok(CoverMedia {
             kind: pdf.kind,
@@ -482,9 +491,10 @@ impl PdfProcessor for PdfProcessorImpl {
 
         // Serialize modified PDF
         let mut pdf_bytes = Vec::new();
-        doc.save_to(&mut pdf_bytes).map_err(|e| PdfError::EmbedFailed {
-            reason: e.to_string(),
-        })?;
+        doc.save_to(&mut pdf_bytes)
+            .map_err(|e| PdfError::EmbedFailed {
+                reason: e.to_string(),
+            })?;
 
         Ok(CoverMedia {
             kind: pdf.kind,
@@ -516,17 +526,17 @@ impl PdfProcessor for PdfProcessorImpl {
             })?;
 
         // Get metadata stream
-        let metadata_obj = doc.get_object(metadata_ref).map_err(|e| {
-            PdfError::ExtractFailed {
+        let metadata_obj = doc
+            .get_object(metadata_ref)
+            .map_err(|e| PdfError::ExtractFailed {
                 reason: format!("failed to get metadata object: {e}"),
-            }
-        })?;
+            })?;
 
-        let metadata_stream = metadata_obj.as_stream().map_err(|_| {
-            PdfError::ExtractFailed {
+        let metadata_stream = metadata_obj
+            .as_stream()
+            .map_err(|_| PdfError::ExtractFailed {
                 reason: "metadata is not a stream".to_string(),
-            }
-        })?;
+            })?;
 
         // Parse XMP content
         let xmp_content = String::from_utf8_lossy(&metadata_stream.content);
@@ -542,11 +552,11 @@ impl PdfProcessor for PdfProcessorImpl {
             })?
             .strict_add(start_tag.len());
 
-        let end_idx = xmp_content.find(end_tag).ok_or_else(|| {
-            PdfError::ExtractFailed {
+        let end_idx = xmp_content
+            .find(end_tag)
+            .ok_or_else(|| PdfError::ExtractFailed {
                 reason: "no closing sf:HiddenData tag found".to_string(),
-            }
-        })?;
+            })?;
 
         let encoded_data = &xmp_content[start_idx..end_idx];
 
@@ -568,64 +578,64 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn test_load_minimal_pdf() {
+    fn test_load_minimal_pdf() -> TestResult {
         let processor = PdfProcessorImpl::default();
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("minimal.pdf");
 
         // Create a minimal valid PDF with one page
         let mut doc = Document::with_version("1.7");
-        let pages_id = doc.new_object_id();
-        let page_id = doc.new_object_id();
+        let catalog_pages = doc.new_object_id();
+        let first_page = doc.new_object_id();
 
         doc.objects.insert(
-            page_id,
+            first_page,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Page",
                 "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
-                "Contents" => Object::Reference((page_id.0 + 1, 0)),
+                "Contents" => Object::Reference((first_page.0 + 1, 0)),
             }),
         );
 
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            b"".to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, b"".to_vec()));
 
         doc.objects.insert(
-            pages_id,
+            catalog_pages,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Pages",
-                "Kids" => vec![Object::Reference(page_id)],
+                "Kids" => vec![Object::Reference(first_page)],
                 "Count" => 1,
             }),
         );
 
         let catalog_id = doc.add_object(lopdf::dictionary! {
             "Type" => "Catalog",
-            "Pages" => Object::Reference(pages_id),
+            "Pages" => Object::Reference(catalog_pages),
         });
 
         doc.trailer.set("Root", Object::Reference(catalog_id));
-        doc.save(&path).expect("save test PDF");
+        doc.save(&path)?;
 
         // Load it
-        let media = processor.load_pdf(&path).expect("load");
+        let media = processor.load_pdf(&path)?;
         assert_eq!(media.kind, CoverMediaKind::PdfDocument);
         assert_eq!(media.metadata.get(KEY_PAGE_COUNT), Some(&"1".to_string()));
+        Ok(())
     }
 
     #[test]
     #[ignore = "requires pdfium system library"]
-    fn test_render_pages_returns_correct_count() {
+    fn test_render_pages_returns_correct_count() -> TestResult {
         let processor = PdfProcessorImpl::default();
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("two_page.pdf");
 
         // Create a 2-page PDF
         let mut doc = Document::with_version("1.7");
-        let pages_id = doc.new_object_id();
+        let catalog_pages = doc.new_object_id();
 
         let page1_id = doc.new_object_id();
         doc.objects.insert(
@@ -636,10 +646,7 @@ mod tests {
                 "Contents" => Object::Reference((page1_id.0 + 1, 0)),
             }),
         );
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            b"".to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, b"".to_vec()));
 
         let page2_id = doc.new_object_id();
         doc.objects.insert(
@@ -650,13 +657,10 @@ mod tests {
                 "Contents" => Object::Reference((page2_id.0 + 1, 0)),
             }),
         );
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            b"".to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, b"".to_vec()));
 
         doc.objects.insert(
-            pages_id,
+            catalog_pages,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Pages",
                 "Kids" => vec![
@@ -669,28 +673,29 @@ mod tests {
 
         let catalog_id = doc.add_object(lopdf::dictionary! {
             "Type" => "Catalog",
-            "Pages" => Object::Reference(pages_id),
+            "Pages" => Object::Reference(catalog_pages),
         });
 
         doc.trailer.set("Root", Object::Reference(catalog_id));
-        doc.save(&path).expect("save test PDF");
+        doc.save(&path)?;
 
         // Load and render
-        let media = processor.load_pdf(&path).expect("load");
-        let images = processor.render_pages_to_images(&media).expect("render");
+        let media = processor.load_pdf(&path)?;
+        let images = processor.render_pages_to_images(&media)?;
         assert_eq!(images.len(), 2);
+        Ok(())
     }
 
     #[test]
     #[ignore = "requires pdfium system library"]
-    fn test_rebuild_pdf_roundtrip() {
+    fn test_rebuild_pdf_roundtrip() -> TestResult {
         let processor = PdfProcessorImpl::default();
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("original.pdf");
 
         // Create a 2-page PDF
         let mut doc = Document::with_version("1.7");
-        let pages_id = doc.new_object_id();
+        let catalog_pages = doc.new_object_id();
 
         let page1_id = doc.new_object_id();
         doc.objects.insert(
@@ -701,10 +706,7 @@ mod tests {
                 "Contents" => Object::Reference((page1_id.0 + 1, 0)),
             }),
         );
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            b"".to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, b"".to_vec()));
 
         let page2_id = doc.new_object_id();
         doc.objects.insert(
@@ -715,13 +717,10 @@ mod tests {
                 "Contents" => Object::Reference((page2_id.0 + 1, 0)),
             }),
         );
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            b"".to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, b"".to_vec()));
 
         doc.objects.insert(
-            pages_id,
+            catalog_pages,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Pages",
                 "Kids" => vec![
@@ -734,77 +733,71 @@ mod tests {
 
         let catalog_id = doc.add_object(lopdf::dictionary! {
             "Type" => "Catalog",
-            "Pages" => Object::Reference(pages_id),
+            "Pages" => Object::Reference(catalog_pages),
         });
 
         doc.trailer.set("Root", Object::Reference(catalog_id));
-        doc.save(&path).expect("save test PDF");
+        doc.save(&path)?;
 
         // Load, render, rebuild, and reload
-        let original = processor.load_pdf(&path).expect("load");
-        let images = processor.render_pages_to_images(&original).expect("render");
-        let rebuilt = processor
-            .rebuild_pdf_from_images(images, &original)
-            .expect("rebuild");
+        let original = processor.load_pdf(&path)?;
+        let images = processor.render_pages_to_images(&original)?;
+        let rebuilt = processor.rebuild_pdf_from_images(images, &original)?;
 
         // Save and reload to verify
         let rebuilt_path = dir.path().join("rebuilt.pdf");
-        processor.save_pdf(&rebuilt, &rebuilt_path).expect("save");
-        let reloaded = processor.load_pdf(&rebuilt_path).expect("reload");
+        processor.save_pdf(&rebuilt, &rebuilt_path)?;
+        let reloaded = processor.load_pdf(&rebuilt_path)?;
 
         assert_eq!(
             reloaded.metadata.get(KEY_PAGE_COUNT),
             original.metadata.get(KEY_PAGE_COUNT)
         );
+        Ok(())
     }
 
     #[test]
     #[ignore = "lopdf requires actual encrypted content, not just Encrypt trailer"]
-    fn test_encrypted_pdf_error() {
+    fn test_encrypted_pdf_error() -> TestResult {
         let processor = PdfProcessorImpl::default();
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("encrypted.pdf");
 
         // Create an encrypted PDF
         let mut doc = Document::with_version("1.7");
-        let pages_id = doc.new_object_id();
-        let page_id = doc.new_object_id();
+        let catalog_pages = doc.new_object_id();
+        let first_page = doc.new_object_id();
 
         doc.objects.insert(
-            page_id,
+            first_page,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Page",
                 "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
-                "Contents" => Object::Reference((page_id.0 + 1, 0)),
+                "Contents" => Object::Reference((first_page.0 + 1, 0)),
             }),
         );
 
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            b"".to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, b"".to_vec()));
 
         doc.objects.insert(
-            pages_id,
+            catalog_pages,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Pages",
-                "Kids" => vec![Object::Reference(page_id)],
+                "Kids" => vec![Object::Reference(first_page)],
                 "Count" => 1,
             }),
         );
 
         let catalog_id = doc.add_object(lopdf::dictionary! {
             "Type" => "Catalog",
-            "Pages" => Object::Reference(pages_id),
+            "Pages" => Object::Reference(catalog_pages),
         });
 
         doc.trailer.set("Root", Object::Reference(catalog_id));
 
         // Add encryption dictionary
-        doc.trailer.set(
-            "Encrypt",
-            Object::Reference((doc.max_id + 1, 0)),
-        );
+        doc.trailer
+            .set("Encrypt", Object::Reference((doc.max_id + 1, 0)));
         doc.objects.insert(
             (doc.max_id + 1, 0),
             Object::Dictionary(lopdf::dictionary! {
@@ -814,134 +807,123 @@ mod tests {
             }),
         );
 
-        doc.save(&path).expect("save encrypted PDF");
+        doc.save(&path)?;
 
         // Try to load it
         let result = processor.load_pdf(&path);
         assert!(matches!(result, Err(PdfError::Encrypted)));
+        Ok(())
     }
 
     #[test]
-    fn test_content_stream_lsb_roundtrip() {
+    fn test_content_stream_lsb_roundtrip() -> TestResult {
         let processor = PdfProcessorImpl::default();
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("test.pdf");
 
         // Create a test PDF with content stream
         let mut doc = Document::with_version("1.7");
-        let pages_id = doc.new_object_id();
-        let page_id = doc.new_object_id();
+        let catalog_pages = doc.new_object_id();
+        let first_page = doc.new_object_id();
 
         doc.objects.insert(
-            page_id,
+            first_page,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Page",
                 "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
-                "Contents" => Object::Reference((page_id.0 + 1, 0)),
+                "Contents" => Object::Reference((first_page.0 + 1, 0)),
             }),
         );
 
         // Content stream with many numeric values for capacity
         let content = b"BT\n/F1 12 Tf\n100 700 Td\n(Hello) Tj\n200 650 Td\n(World) Tj\n50 600 Td\n(Test) Tj\n150 550 Td\n(PDF) Tj\nET\n1 0 0 1 0 0 cm\n";
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            content.to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, content.to_vec()));
 
         doc.objects.insert(
-            pages_id,
+            catalog_pages,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Pages",
-                "Kids" => vec![Object::Reference(page_id)],
+                "Kids" => vec![Object::Reference(first_page)],
                 "Count" => 1,
             }),
         );
 
         let catalog_id = doc.add_object(lopdf::dictionary! {
             "Type" => "Catalog",
-            "Pages" => Object::Reference(pages_id),
+            "Pages" => Object::Reference(catalog_pages),
         });
 
         doc.trailer.set("Root", Object::Reference(catalog_id));
-        doc.save(&path).expect("save test PDF");
+        doc.save(&path)?;
 
         // Load and embed payload (very small to fit limited capacity)
-        let original = processor.load_pdf(&path).expect("load");
+        let original = processor.load_pdf(&path)?;
         let payload = Payload::from_bytes(vec![0xAB]); // 1 byte = 8 bits (need 8+ numbers)
-        let stego = processor
-            .embed_in_content_stream(original.clone(), &payload)
-            .expect("embed");
+        let stego = processor.embed_in_content_stream(original, &payload)?;
 
         // Verify PDF is still parseable
         let stego_path = dir.path().join("stego.pdf");
-        processor.save_pdf(&stego, &stego_path).expect("save stego");
-        let reloaded = processor.load_pdf(&stego_path).expect("reload stego");
+        processor.save_pdf(&stego, &stego_path)?;
+        let reloaded = processor.load_pdf(&stego_path)?;
 
         // Extract and verify
-        let extracted = processor
-            .extract_from_content_stream(&reloaded)
-            .expect("extract");
+        let extracted = processor.extract_from_content_stream(&reloaded)?;
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
-    fn test_metadata_embed_roundtrip() {
+    fn test_metadata_embed_roundtrip() -> TestResult {
         let processor = PdfProcessorImpl::default();
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("test.pdf");
 
         // Create a minimal test PDF
         let mut doc = Document::with_version("1.7");
-        let pages_id = doc.new_object_id();
-        let page_id = doc.new_object_id();
+        let catalog_pages = doc.new_object_id();
+        let first_page = doc.new_object_id();
 
         doc.objects.insert(
-            page_id,
+            first_page,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Page",
                 "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
-                "Contents" => Object::Reference((page_id.0 + 1, 0)),
+                "Contents" => Object::Reference((first_page.0 + 1, 0)),
             }),
         );
 
-        doc.add_object(lopdf::Stream::new(
-            lopdf::dictionary! {},
-            b"".to_vec(),
-        ));
+        doc.add_object(lopdf::Stream::new(lopdf::dictionary! {}, b"".to_vec()));
 
         doc.objects.insert(
-            pages_id,
+            catalog_pages,
             Object::Dictionary(lopdf::dictionary! {
                 "Type" => "Pages",
-                "Kids" => vec![Object::Reference(page_id)],
+                "Kids" => vec![Object::Reference(first_page)],
                 "Count" => 1,
             }),
         );
 
         let catalog_id = doc.add_object(lopdf::dictionary! {
             "Type" => "Catalog",
-            "Pages" => Object::Reference(pages_id),
+            "Pages" => Object::Reference(catalog_pages),
         });
 
         doc.trailer.set("Root", Object::Reference(catalog_id));
-        doc.save(&path).expect("save test PDF");
+        doc.save(&path)?;
 
         // Load and embed payload
-        let original = processor.load_pdf(&path).expect("load");
+        let original = processor.load_pdf(&path)?;
         let payload = Payload::from_bytes(vec![0u8; 128]); // 128-byte payload
-        let stego = processor
-            .embed_in_metadata(original.clone(), &payload)
-            .expect("embed");
+        let stego = processor.embed_in_metadata(original, &payload)?;
 
         // Verify PDF is still parseable
         let stego_path = dir.path().join("stego.pdf");
-        processor.save_pdf(&stego, &stego_path).expect("save stego");
-        let reloaded = processor.load_pdf(&stego_path).expect("reload stego");
+        processor.save_pdf(&stego, &stego_path)?;
+        let reloaded = processor.load_pdf(&stego_path)?;
 
         // Extract and verify
-        let extracted = processor
-            .extract_from_metadata(&reloaded)
-            .expect("extract");
+        let extracted = processor.extract_from_metadata(&reloaded)?;
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 }

@@ -60,10 +60,14 @@ impl SecurePanicWiper {
         let zeros = vec![0u8; 4096];
         let mut remaining = file_size;
         while remaining > 0 {
-            let chunk_size = remaining.min(4096);
-            file.write_all(&zeros[..chunk_size as usize])
-                .map_err(|e| format!("failed to write zeros: {e}"))?;
-            remaining -= chunk_size;
+            let chunk_size = remaining.min(4096) as usize;
+            file.write_all(
+                zeros
+                    .get(..chunk_size)
+                    .ok_or_else(|| format!("chunk_size {chunk_size} exceeds buffer"))?,
+            )
+            .map_err(|e| format!("failed to write zeros: {e}"))?;
+            remaining -= chunk_size as u64;
         }
         file.flush()
             .map_err(|e| format!("failed to flush (pass 1): {e}"))?;
@@ -74,10 +78,13 @@ impl SecurePanicWiper {
         let ones = vec![0xFFu8; 4096];
         let mut remaining = file_size;
         while remaining > 0 {
-            let chunk_size = remaining.min(4096);
-            file.write_all(&ones[..chunk_size as usize])
-                .map_err(|e| format!("failed to write ones: {e}"))?;
-            remaining -= chunk_size;
+            let chunk_size = remaining.min(4096) as usize;
+            file.write_all(
+                ones.get(..chunk_size)
+                    .ok_or_else(|| format!("chunk_size {chunk_size} exceeds buffer"))?,
+            )
+            .map_err(|e| format!("failed to write ones: {e}"))?;
+            remaining -= chunk_size as u64;
         }
         file.flush()
             .map_err(|e| format!("failed to flush (pass 2): {e}"))?;
@@ -89,11 +96,19 @@ impl SecurePanicWiper {
         let mut random_buf = vec![0u8; 4096];
         let mut remaining = file_size;
         while remaining > 0 {
-            let chunk_size = remaining.min(4096);
-            rng.fill_bytes(&mut random_buf[..chunk_size as usize]);
-            file.write_all(&random_buf[..chunk_size as usize])
-                .map_err(|e| format!("failed to write random data: {e}"))?;
-            remaining -= chunk_size;
+            let chunk_size = remaining.min(4096) as usize;
+            rng.fill_bytes(
+                random_buf
+                    .get_mut(..chunk_size)
+                    .ok_or_else(|| format!("chunk_size {chunk_size} exceeds buffer"))?,
+            );
+            file.write_all(
+                random_buf
+                    .get(..chunk_size)
+                    .ok_or_else(|| format!("chunk_size {chunk_size} exceeds buffer"))?,
+            )
+            .map_err(|e| format!("failed to write random data: {e}"))?;
+            remaining -= chunk_size as u64;
         }
         file.flush()
             .map_err(|e| format!("failed to flush (pass 3): {e}"))?;
@@ -292,18 +307,15 @@ impl GeographicDistributor for GeographicDistributorImpl {
         for (i, cover) in covers.into_iter().enumerate().take(shard_count) {
             let start = i * chunk_size;
             let end = (start + chunk_size).min(payload_bytes.len());
-            let chunk = if start < payload_bytes.len() {
-                &payload_bytes[start..end]
-            } else {
-                &[]
-            };
+            let chunk = payload_bytes.get(start..end).unwrap_or_default();
 
             let shard_payload = Payload::from_bytes(chunk.to_vec());
-            let stego = embedder.embed(cover, &shard_payload).map_err(|e| {
-                OpsecError::ManifestError {
-                    reason: format!("embed failed for shard {i}: {e}"),
-                }
-            })?;
+            let stego =
+                embedder
+                    .embed(cover, &shard_payload)
+                    .map_err(|e| OpsecError::ManifestError {
+                        reason: format!("embed failed for shard {i}: {e}"),
+                    })?;
             results.push(stego);
         }
 
@@ -347,14 +359,14 @@ impl ForensicWatermarker for ForensicWatermarkerImpl {
         tags: &[WatermarkTripwireTag],
     ) -> Result<Option<WatermarkReceipt>, OpsecError> {
         let result = crate::domain::opsec::identify_watermark(stego, tags);
-        Ok(result.map(|idx| {
-            let tag = &tags[idx];
-            WatermarkReceipt {
+        Ok(result.and_then(|idx| {
+            let tag = tags.get(idx)?;
+            Some(WatermarkReceipt {
                 recipient: tag.recipient_id.to_string(),
                 algorithm: "lsb-tripwire-v1".into(),
                 shards: vec![],
                 created_at: chrono::Utc::now(),
-            }
+            })
         }))
     }
 }
@@ -366,56 +378,62 @@ mod tests {
     use std::io::Read;
     use tempfile::TempDir;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn test_wipe_single_file() {
-        let temp_dir = TempDir::new().expect("failed to create temp dir");
+    fn test_wipe_single_file() -> TestResult {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("test_key.txt");
 
         // Create a file with some content
-        fs::write(&file_path, b"secret key data").expect("failed to write test file");
+        fs::write(&file_path, b"secret key data")?;
 
         assert!(file_path.exists());
 
         // Wipe the file
-        SecurePanicWiper::wipe_file(&file_path).expect("wipe should succeed");
+        SecurePanicWiper::wipe_file(&file_path)?;
 
         // File should no longer exist
         assert!(!file_path.exists());
+        Ok(())
     }
 
     #[test]
-    fn test_wipe_empty_file() {
-        let temp_dir = TempDir::new().expect("failed to create temp dir");
+    fn test_wipe_empty_file() -> TestResult {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("empty.txt");
 
         // Create an empty file
-        File::create(&file_path).expect("failed to create empty file");
+        File::create(&file_path)?;
         assert!(file_path.exists());
 
         // Wipe should succeed
-        SecurePanicWiper::wipe_file(&file_path).expect("wipe should succeed");
+        SecurePanicWiper::wipe_file(&file_path)?;
         assert!(!file_path.exists());
+        Ok(())
     }
 
     #[test]
     fn test_wipe_nonexistent_file_returns_error() {
         let result = SecurePanicWiper::wipe_file(Path::new("/nonexistent/file.txt"));
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("does not exist"));
+        if let Err(msg) = result {
+            assert!(msg.contains("does not exist"));
+        }
     }
 
     #[test]
-    fn test_wipe_config_with_multiple_files() {
-        let temp_dir = TempDir::new().expect("failed to create temp dir");
+    fn test_wipe_config_with_multiple_files() -> TestResult {
+        let temp_dir = TempDir::new()?;
 
         let key1 = temp_dir.path().join("key1.pem");
         let key2 = temp_dir.path().join("key2.pem");
         let config_file = temp_dir.path().join("config.toml");
 
         // Create test files
-        fs::write(&key1, b"private key 1").expect("failed to write key1");
-        fs::write(&key2, b"private key 2").expect("failed to write key2");
-        fs::write(&config_file, b"sensitive config").expect("failed to write config");
+        fs::write(&key1, b"private key 1")?;
+        fs::write(&key2, b"private key 2")?;
+        fs::write(&config_file, b"sensitive config")?;
 
         assert!(key1.exists());
         assert!(key2.exists());
@@ -429,56 +447,58 @@ mod tests {
         };
 
         let wiper = SecurePanicWiper::new();
-        wiper.wipe(&wipe_config).expect("wipe should succeed");
+        wiper.wipe(&wipe_config)?;
 
         // All files should be gone
         assert!(!key1.exists());
         assert!(!key2.exists());
         assert!(!config_file.exists());
+        Ok(())
     }
 
     #[test]
-    fn test_wipe_directory_recursive() {
-        let temp_dir = TempDir::new().expect("failed to create temp dir");
+    fn test_wipe_directory_recursive() -> TestResult {
+        let temp_dir = TempDir::new()?;
         let wipe_dir = temp_dir.path().join("to_wipe");
         let subdir = wipe_dir.join("subdir");
 
         // Create directory structure
-        fs::create_dir_all(&subdir).expect("failed to create subdirs");
+        fs::create_dir_all(&subdir)?;
 
         let file1 = wipe_dir.join("file1.txt");
         let file2 = subdir.join("file2.txt");
 
-        fs::write(&file1, b"temp data 1").expect("failed to write file1");
-        fs::write(&file2, b"temp data 2").expect("failed to write file2");
+        fs::write(&file1, b"temp data 1")?;
+        fs::write(&file2, b"temp data 2")?;
 
         assert!(wipe_dir.exists());
         assert!(file1.exists());
         assert!(file2.exists());
 
         // Wipe the directory
-        SecurePanicWiper::wipe_dir_recursive(&wipe_dir).expect("wipe should succeed");
+        SecurePanicWiper::wipe_dir_recursive(&wipe_dir)?;
 
         // Directory and all contents should be gone
         assert!(!wipe_dir.exists());
         assert!(!file1.exists());
         assert!(!file2.exists());
+        Ok(())
     }
 
     #[test]
-    fn test_wipe_continues_on_partial_failure() {
-        let temp_dir = TempDir::new().expect("failed to create temp dir");
+    fn test_wipe_continues_on_partial_failure() -> TestResult {
+        let temp_dir = TempDir::new()?;
 
         let key1 = temp_dir.path().join("key1.pem");
         let nonexistent = temp_dir.path().join("nonexistent.pem");
         let key2 = temp_dir.path().join("key2.pem");
 
         // Create only key1 and key2
-        fs::write(&key1, b"key 1").expect("failed to write key1");
-        fs::write(&key2, b"key 2").expect("failed to write key2");
+        fs::write(&key1, b"key 1")?;
+        fs::write(&key2, b"key 2")?;
 
         let wipe_config = PanicWipeConfig {
-            key_paths: vec![key1.clone(), nonexistent.clone(), key2.clone()],
+            key_paths: vec![key1.clone(), nonexistent, key2.clone()],
             config_paths: vec![],
             temp_dirs: vec![],
         };
@@ -487,42 +507,41 @@ mod tests {
         let result = wiper.wipe(&wipe_config);
 
         // Should return an error for the nonexistent file
-        assert!(result.is_err());
-        if let Err(OpsecError::WipeStepFailed { path, .. }) = result {
-            assert!(path.contains("nonexistent.pem"));
-        } else {
-            panic!("expected WipeStepFailed error");
-        }
+        assert!(
+            matches!(&result, Err(OpsecError::WipeStepFailed { path, .. }) if path.contains("nonexistent.pem")),
+        );
 
         // But key1 and key2 should still be wiped
         assert!(!key1.exists());
         assert!(!key2.exists());
+        Ok(())
     }
 
     #[test]
-    fn test_overwrite_actually_changes_file_content() {
-        let temp_dir = TempDir::new().expect("failed to create temp dir");
+    fn test_overwrite_actually_changes_file_content() -> TestResult {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("test.dat");
 
         // Write some recognizable pattern
         let original_data = b"AAAABBBBCCCCDDDD";
-        fs::write(&file_path, original_data).expect("failed to write test file");
+        fs::write(&file_path, original_data)?;
 
         // Read back to verify
-        let mut file = File::open(&file_path).expect("failed to open for reading");
+        let mut file = File::open(&file_path)?;
         let mut read_back = Vec::new();
-        file.read_to_end(&mut read_back).expect("failed to read");
+        file.read_to_end(&mut read_back)?;
         assert_eq!(read_back, original_data);
         drop(file);
 
         // Now open and check size, then wipe
-        let file_size = fs::metadata(&file_path).unwrap().len();
+        let file_size = fs::metadata(&file_path)?.len();
         assert_eq!(file_size, original_data.len() as u64);
 
-        SecurePanicWiper::wipe_file(&file_path).expect("wipe should succeed");
+        SecurePanicWiper::wipe_file(&file_path)?;
 
         // File should be gone
         assert!(!file_path.exists());
+        Ok(())
     }
 
     // ─── AmnesiaPipeline Tests ────────────────────────────────────────────
@@ -558,37 +577,35 @@ mod tests {
     }
 
     #[test]
-    fn amnesiac_adapter_embed_roundtrip() {
+    fn amnesiac_adapter_embed_roundtrip() -> TestResult {
         let pipeline = AmnesiaPipelineImpl::new();
         let mut cover = Cursor::new(b"img-data".to_vec());
         let mut payload = Cursor::new(b"secret".to_vec());
         let mut output = Vec::new();
 
-        pipeline
-            .embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)
-            .expect("embed via adapter");
+        pipeline.embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)?;
 
         assert!(output.starts_with(b"img-data"));
         assert!(output.ends_with(b"secret"));
+        Ok(())
     }
 
     #[test]
-    fn amnesiac_adapter_default() {
-        let pipeline = AmnesiaPipelineImpl::default();
+    fn amnesiac_adapter_default() -> TestResult {
+        let pipeline = AmnesiaPipelineImpl;
         let mut cover = Cursor::new(b"c".to_vec());
         let mut payload = Cursor::new(b"p".to_vec());
         let mut output = Vec::new();
 
-        pipeline
-            .embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)
-            .expect("embed via default adapter");
+        pipeline.embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)?;
 
         assert!(!output.is_empty());
+        Ok(())
     }
 
     // ─── GeographicDistributor Tests ──────────────────────────────────────
 
-    use crate::domain::types::{GeoShardEntry, GeographicManifest, CoverMediaKind};
+    use crate::domain::types::{CoverMediaKind, GeoShardEntry, GeographicManifest};
 
     fn test_covers(n: usize) -> Vec<CoverMedia> {
         (0..n)
@@ -628,17 +645,17 @@ mod tests {
     }
 
     #[test]
-    fn geographic_distribute_succeeds() {
+    fn geographic_distribute_succeeds() -> TestResult {
         let distributor = GeographicDistributorImpl::new();
         let payload = Payload::from_bytes(b"secret payload data here!".to_vec());
         let covers = test_covers(3);
         let manifest = test_geo_manifest();
 
-        let results = distributor
-            .distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)
-            .expect("distribute should succeed");
+        let results =
+            distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)?;
 
         assert_eq!(results.len(), 3);
+        Ok(())
     }
 
     #[test]
@@ -648,7 +665,8 @@ mod tests {
         let covers = test_covers(1); // Only 1 cover for 3 shards
         let manifest = test_geo_manifest();
 
-        let result = distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder);
+        let result =
+            distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder);
         assert!(result.is_err());
     }
 
@@ -666,27 +684,28 @@ mod tests {
             minimum_jurisdictions: 3, // Needs 3 but only has 1
         };
 
-        let result = distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder);
+        let result =
+            distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder);
         assert!(result.is_err());
     }
 
     #[test]
-    fn geographic_distributor_default() {
-        let distributor = GeographicDistributorImpl::default();
+    fn geographic_distributor_default() -> TestResult {
+        let distributor = GeographicDistributorImpl;
         let payload = Payload::from_bytes(b"data".to_vec());
         let covers = test_covers(3);
         let manifest = test_geo_manifest();
 
-        let results = distributor
-            .distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)
-            .expect("default should work");
+        let results =
+            distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)?;
         assert_eq!(results.len(), 3);
+        Ok(())
     }
 
     // ─── ForensicWatermarker Tests ────────────────────────────────────────
 
     #[test]
-    fn forensic_watermarker_embed_roundtrip() {
+    fn forensic_watermarker_embed_roundtrip() -> TestResult {
         let wm = ForensicWatermarkerImpl::new();
         let cover = CoverMedia {
             kind: CoverMediaKind::PngImage,
@@ -698,19 +717,18 @@ mod tests {
             embedding_seed: b"adapter-test-seed".to_vec(),
         };
 
-        let stego = wm.embed_tripwire(cover, &tag).expect("embed");
-        let receipt = wm
-            .identify_recipient(&stego, &[tag.clone()])
-            .expect("identify");
+        let stego = wm.embed_tripwire(cover, &tag)?;
+        let receipt = wm.identify_recipient(&stego, std::slice::from_ref(&tag))?;
         assert!(receipt.is_some());
-        let receipt = receipt.expect("should have receipt");
+        let receipt = receipt.ok_or("expected watermark receipt")?;
         assert_eq!(receipt.recipient, tag.recipient_id.to_string());
         assert_eq!(receipt.algorithm, "lsb-tripwire-v1");
+        Ok(())
     }
 
     #[test]
-    fn forensic_watermarker_no_match() {
-        let wm = ForensicWatermarkerImpl::default();
+    fn forensic_watermarker_no_match() -> TestResult {
+        let wm = ForensicWatermarkerImpl;
         let cover = CoverMedia {
             kind: CoverMediaKind::PngImage,
             data: Bytes::from(vec![0u8; 1024]),
@@ -721,9 +739,8 @@ mod tests {
             embedding_seed: b"unknown".to_vec(),
         };
 
-        let result = wm
-            .identify_recipient(&cover, &[unknown_tag])
-            .expect("should not error");
+        let result = wm.identify_recipient(&cover, &[unknown_tag])?;
         assert!(result.is_none());
+        Ok(())
     }
 }

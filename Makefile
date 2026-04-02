@@ -1,4 +1,4 @@
-.PHONY: build test lint clean release completions deny coverage doc check fmt
+.PHONY: build test lint clean release completions deny coverage doc book book-serve check fmt
 
 BINARY   := shadowforge
 TARGET   := target/release/$(BINARY)
@@ -60,6 +60,13 @@ completions: build
 
 doc:
 	cargo doc --workspace --all-features --no-deps --open
+
+book:
+	mdbook build docs
+	@echo "Book written to docs/book/"
+
+book-serve:
+	mdbook serve docs --open
 
 # ─── Corpus (sample index build for testing) ──────────────────────────────────
 

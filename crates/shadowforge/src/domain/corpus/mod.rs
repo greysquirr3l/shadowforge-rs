@@ -34,7 +34,14 @@ pub fn extract_lsb_pattern(pixel_bytes: &[u8]) -> Bytes {
         let out_byte_idx = i / 8;
         let bit_idx = 7 - (i % 8);
         if byte & 1 == 1 {
-            pattern[out_byte_idx] |= 1 << bit_idx;
+            // out_byte_idx = i/8 <= (pixel_bytes.len()-1)/8 < out_len
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "out_byte_idx = i/8 < ceil(len/8) = out_len"
+            )]
+            {
+                pattern[out_byte_idx] |= 1 << bit_idx;
+            }
         }
     }
 
@@ -71,8 +78,13 @@ pub fn score_match(corpus_pattern: &[u8], payload_pattern: &[u8]) -> u64 {
     if compare_len == 0 {
         return u64::MAX;
     }
-    hamming_distance(&corpus_pattern[..compare_len], &payload_pattern[..compare_len])
-        .unwrap_or(u64::MAX)
+    match (
+        corpus_pattern.get(..compare_len),
+        payload_pattern.get(..compare_len),
+    ) {
+        (Some(a), Some(b)) => hamming_distance(a, b).unwrap_or(u64::MAX),
+        _ => u64::MAX,
+    }
 }
 
 /// Determine if a Hamming distance counts as a "close enough" match.
@@ -133,7 +145,7 @@ mod tests {
         let pixels = [0x01, 0x03, 0x00];
         let pattern = extract_lsb_pattern(&pixels);
         assert_eq!(pattern.len(), 1);
-        assert_eq!(pattern[0], 0b1100_0000);
+        assert_eq!(pattern.as_ref(), &[0b1100_0000]);
     }
 
     #[test]
@@ -148,8 +160,7 @@ mod tests {
         let payload = b"\xFF";
         let result = payload_to_bit_pattern(payload, Some(16)); // 16 bits = 2 bytes
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], 0xFF);
-        assert_eq!(result[1], 0x00);
+        assert_eq!(result.as_ref(), &[0xFF, 0x00]);
     }
 
     #[test]

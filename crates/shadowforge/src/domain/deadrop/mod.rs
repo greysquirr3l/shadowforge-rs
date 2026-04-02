@@ -37,8 +37,10 @@ pub const fn platform_is_lossless(platform: &PlatformProfile) -> bool {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn retrieval_manifest_serialises_to_json() {
+    fn retrieval_manifest_serialises_to_json() -> TestResult {
         let manifest = build_retrieval_manifest(
             &PlatformProfile::Instagram,
             "https://instagram.com/p/abc123".to_owned(),
@@ -46,11 +48,12 @@ mod tests {
             b"fake stego bytes",
         );
 
-        let json = serde_json::to_string_pretty(&manifest).expect("serialise");
+        let json = serde_json::to_string_pretty(&manifest)?;
         assert!(json.contains("Instagram"));
         assert!(json.contains("abc123"));
         assert!(!manifest.stego_hash.is_empty());
-    }
+        Ok(())
+}
 
     #[test]
     fn retrieval_manifest_hash_changes_with_content() {
@@ -81,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn retrieval_manifest_deserialises_roundtrip() {
+    fn retrieval_manifest_deserialises_roundtrip() -> TestResult {
         let manifest = build_retrieval_manifest(
             &PlatformProfile::Custom {
                 quality: 85,
@@ -92,11 +95,12 @@ mod tests {
             b"test data",
         );
 
-        let json = serde_json::to_string(&manifest).expect("serialise");
+        let json = serde_json::to_string(&manifest)?;
         let recovered: RetrievalManifest =
-            serde_json::from_str(&json).expect("deserialise");
+            serde_json::from_str(&json)?;
 
         assert_eq!(recovered.stego_hash, manifest.stego_hash);
         assert_eq!(recovered.retrieval_url, manifest.retrieval_url);
-    }
+        Ok(())
+}
 }

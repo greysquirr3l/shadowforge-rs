@@ -45,10 +45,7 @@ pub fn dispatch(cli: Cli) -> Result<(), AppError> {
         Commands::Watermark(args) => cmd_watermark(&args),
         Commands::Corpus(args) => cmd_corpus(&args),
         Commands::Panic(args) => cmd_panic(&args),
-        Commands::Completions(args) => {
-            cmd_completions(&args);
-            Ok(())
-        }
+        Commands::Completions(args) => cmd_completions(&args),
     }
 }
 
@@ -578,12 +575,25 @@ fn cmd_panic(args: &cli::PanicArgs) -> Result<(), AppError> {
 
 // ─── Completions ──────────────────────────────────────────────────────────────
 
-fn cmd_completions(args: &cli::CompletionsArgs) {
+fn cmd_completions(args: &cli::CompletionsArgs) -> Result<(), AppError> {
     use clap::CommandFactory;
     use clap_complete::generate;
 
     let mut cmd = Cli::command();
-    generate(args.shell, &mut cmd, "shadowforge", &mut io::stdout());
+    match &args.output {
+        Some(path) => {
+            let mut file = std::fs::File::create(path).map_err(|e| {
+                AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData {
+                    reason: format!("write {}: {e}", path.display()),
+                })
+            })?;
+            generate(args.shell, &mut cmd, "shadowforge", &mut file);
+        }
+        None => {
+            generate(args.shell, &mut cmd, "shadowforge", &mut io::stdout());
+        }
+    }
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

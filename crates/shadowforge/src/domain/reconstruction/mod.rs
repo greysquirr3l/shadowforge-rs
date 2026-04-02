@@ -31,8 +31,8 @@ pub fn arrange_shards(shards: Vec<Shard>, total_shards: u8) -> Vec<Option<Shard>
     let mut slots: Vec<Option<Shard>> = (0..usize::from(total_shards)).map(|_| None).collect();
     for shard in shards {
         let idx = usize::from(shard.index);
-        if idx < slots.len() && slots[idx].is_none() {
-            slots[idx] = Some(shard);
+        if let Some(slot @ None) = slots.get_mut(idx) {
+            *slot = Some(shard);
         }
     }
     slots
@@ -69,18 +69,13 @@ pub fn serialize_shard(shard: &Shard) -> Vec<u8> {
 #[must_use]
 pub fn deserialize_shard(data: &[u8]) -> Option<Shard> {
     // Minimum: index(1) + total(1) + hmac(32) + data_len(4) = 38
-    if data.len() < 38 {
-        return None;
-    }
-    let index = data[0];
-    let total = data[1];
+    let index = *data.first()?;
+    let total = *data.get(1)?;
     let mut hmac_tag = [0u8; 32];
-    hmac_tag.copy_from_slice(&data[2..34]);
-    let data_len = u32::from_le_bytes([data[34], data[35], data[36], data[37]]) as usize;
-    if data.len() < 38_usize.strict_add(data_len) {
-        return None;
-    }
-    let shard_data = data[38..38_usize.strict_add(data_len)].to_vec();
+    hmac_tag.copy_from_slice(data.get(2..34)?);
+    let len_bytes: [u8; 4] = data.get(34..38)?.try_into().ok()?;
+    let data_len = u32::from_le_bytes(len_bytes) as usize;
+    let shard_data = data.get(38..38_usize.strict_add(data_len))?.to_vec();
     Some(Shard {
         index,
         total,
@@ -92,6 +87,8 @@ pub fn deserialize_shard(data: &[u8]) -> Option<Shard> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     fn make_shard(index: u8, total: u8, data: &[u8]) -> Shard {
         Shard {
@@ -115,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn arrange_shards_correct_placement() {
+    fn arrange_shards_correct_placement() -> TestResult {
         let shards = vec![
             make_shard(2, 4, b"c"),
             make_shard(0, 4, b"a"),
@@ -123,19 +120,42 @@ mod tests {
         ];
         let slots = arrange_shards(shards, 4);
         assert_eq!(slots.len(), 4);
-        assert!(slots[0].is_some());
-        assert!(slots[1].is_none());
-        assert!(slots[2].is_some());
-        assert!(slots[3].is_some());
-        assert_eq!(slots[0].as_ref().expect("slot 0").data, b"a");
-        assert_eq!(slots[2].as_ref().expect("slot 2").data, b"c");
+        assert!(slots.first().and_then(Option::as_ref).is_some());
+        assert!(slots.get(1).and_then(Option::as_ref).is_none());
+        assert!(slots.get(2).and_then(Option::as_ref).is_some());
+        assert!(slots.get(3).and_then(Option::as_ref).is_some());
+        assert_eq!(
+            slots
+                .first()
+                .and_then(Option::as_ref)
+                .ok_or("missing slot 0")?
+                .data,
+            b"a"
+        );
+        assert_eq!(
+            slots
+                .get(2)
+                .and_then(Option::as_ref)
+                .ok_or("missing slot 2")?
+                .data,
+            b"c"
+        );
+        Ok(())
     }
 
     #[test]
-    fn arrange_shards_duplicate_index_ignored() {
+    fn arrange_shards_duplicate_index_ignored() -> TestResult {
         let shards = vec![make_shard(0, 2, b"first"), make_shard(0, 2, b"second")];
         let slots = arrange_shards(shards, 2);
-        assert_eq!(slots[0].as_ref().expect("slot 0").data, b"first");
+        assert_eq!(
+            slots
+                .first()
+                .and_then(Option::as_ref)
+                .ok_or("missing slot 0")?
+                .data,
+            b"first"
+        );
+        Ok(())
     }
 
     #[test]

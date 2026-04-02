@@ -4,13 +4,18 @@
 //! function that needs randomness accepts a CSPRNG as a parameter so it
 //! can be exercised with a seeded RNG in tests.
 
-use aes_gcm::{Aes256Gcm, Key as AesKey, KeyInit, Nonce};
 use aes_gcm::aead::Aead;
-use argon2::{Argon2, Params, PasswordHasher};
+use aes_gcm::{Aes256Gcm, Key as AesKey, KeyInit, Nonce};
 use argon2::password_hash::SaltString;
-use bytes::{Bytes, BytesMut, BufMut};
-use ml_dsa::{EncodedSignature, EncodedVerifyingKey, KeyGen, MlDsa87, VerifyingKey, signature::Keypair};
-use ml_kem::{Decapsulate, DecapsulationKey1024, Encapsulate as _, EncapsulationKey1024, Kem as _, Key, KeyExport as _, MlKem1024};
+use argon2::{Argon2, Params, PasswordHasher};
+use bytes::{BufMut, Bytes, BytesMut};
+use ml_dsa::{
+    EncodedSignature, EncodedVerifyingKey, KeyGen, MlDsa87, VerifyingKey, signature::Keypair,
+};
+use ml_kem::{
+    Decapsulate, DecapsulationKey1024, Encapsulate as _, EncapsulationKey1024, Kem as _, Key,
+    KeyExport as _, MlKem1024,
+};
 use rand_core::CryptoRng;
 use zeroize::Zeroize;
 
@@ -45,9 +50,9 @@ const ARGON2_SALT_LEN: usize = 32;
 /// not carry a recoverable seed (should never occur in practice).
 pub fn generate_kem_keypair(rng: &mut impl CryptoRng) -> Result<KeyPair, CryptoError> {
     let (dk, ek) = MlKem1024::generate_keypair_from_rng(rng);
-    let seed = dk
-        .to_seed()
-        .ok_or_else(|| CryptoError::KeyGenFailed { reason: "freshly generated key has no seed".into() })?;
+    let seed = dk.to_seed().ok_or_else(|| CryptoError::KeyGenFailed {
+        reason: "freshly generated key has no seed".into(),
+    })?;
     let ek_bytes = ek.to_bytes();
     Ok(KeyPair {
         public_key: (ek_bytes.as_ref() as &[u8]).to_vec(),
@@ -69,13 +74,21 @@ pub fn encapsulate_kem(
     rng: &mut impl CryptoRng,
 ) -> Result<(Bytes, Bytes), CryptoError> {
     if public_key.len() != KEM_EK_LEN {
-        return Err(CryptoError::InvalidKeyLength { expected: KEM_EK_LEN, got: public_key.len() });
+        return Err(CryptoError::InvalidKeyLength {
+            expected: KEM_EK_LEN,
+            got: public_key.len(),
+        });
     }
-    let key_arr: Key<EncapsulationKey1024> = public_key
-        .try_into()
-        .map_err(|_| CryptoError::InvalidKeyLength { expected: KEM_EK_LEN, got: public_key.len() })?;
-    let ek = EncapsulationKey1024::new(&key_arr)
-        .map_err(|_| CryptoError::EncapsulationFailed { reason: "invalid encapsulation key".into() })?;
+    let key_arr: Key<EncapsulationKey1024> =
+        public_key
+            .try_into()
+            .map_err(|_| CryptoError::InvalidKeyLength {
+                expected: KEM_EK_LEN,
+                got: public_key.len(),
+            })?;
+    let ek = EncapsulationKey1024::new(&key_arr).map_err(|_| CryptoError::EncapsulationFailed {
+        reason: "invalid encapsulation key".into(),
+    })?;
     let (ct, ss) = ek.encapsulate_with_rng(rng);
     Ok((
         Bytes::copy_from_slice(ct.as_ref() as &[u8]),
@@ -95,11 +108,17 @@ pub fn encapsulate_kem(
 /// has the wrong length.
 pub fn decapsulate_kem(secret_key: &[u8], ciphertext: &[u8]) -> Result<Bytes, CryptoError> {
     if secret_key.len() != KEM_SEED_LEN {
-        return Err(CryptoError::InvalidKeyLength { expected: KEM_SEED_LEN, got: secret_key.len() });
+        return Err(CryptoError::InvalidKeyLength {
+            expected: KEM_SEED_LEN,
+            got: secret_key.len(),
+        });
     }
     let seed: ml_kem::Seed = secret_key
         .try_into()
-        .map_err(|_| CryptoError::InvalidKeyLength { expected: KEM_SEED_LEN, got: secret_key.len() })?;
+        .map_err(|_| CryptoError::InvalidKeyLength {
+            expected: KEM_SEED_LEN,
+            got: secret_key.len(),
+        })?;
     let dk = DecapsulationKey1024::from_seed(seed);
     let ss = dk
         .decapsulate_slice(ciphertext)
@@ -126,7 +145,10 @@ pub fn generate_dsa_keypair(rng: &mut impl CryptoRng) -> Result<KeyPair, CryptoE
     let public_key = (vk_encoded.as_ref() as &[u8]).to_vec();
     let secret_key = (seed.as_ref() as &[u8]).to_vec();
     seed.zeroize();
-    Ok(KeyPair { public_key, secret_key })
+    Ok(KeyPair {
+        public_key,
+        secret_key,
+    })
 }
 
 /// Sign `message` with the ML-DSA-87 secret key (32-byte seed).
@@ -139,17 +161,26 @@ pub fn generate_dsa_keypair(rng: &mut impl CryptoRng) -> Result<KeyPair, CryptoE
 /// signing operation fails.
 pub fn sign_dsa(secret_key: &[u8], message: &[u8]) -> Result<Signature, CryptoError> {
     if secret_key.len() != DSA_SEED_LEN {
-        return Err(CryptoError::InvalidKeyLength { expected: DSA_SEED_LEN, got: secret_key.len() });
+        return Err(CryptoError::InvalidKeyLength {
+            expected: DSA_SEED_LEN,
+            got: secret_key.len(),
+        });
     }
-    let mut seed_arr: ml_dsa::B32 = secret_key
-        .try_into()
-        .map_err(|_| CryptoError::InvalidKeyLength { expected: DSA_SEED_LEN, got: secret_key.len() })?;
+    let mut seed_arr: ml_dsa::B32 =
+        secret_key
+            .try_into()
+            .map_err(|_| CryptoError::InvalidKeyLength {
+                expected: DSA_SEED_LEN,
+                got: secret_key.len(),
+            })?;
     let signing_key = MlDsa87::from_seed(&seed_arr);
     seed_arr.zeroize();
     let ml_sig = signing_key
         .signing_key()
         .sign_deterministic(message, b"")
-        .map_err(|e| CryptoError::SigningFailed { reason: e.to_string() })?;
+        .map_err(|e| CryptoError::SigningFailed {
+            reason: e.to_string(),
+        })?;
     let encoded: EncodedSignature<MlDsa87> = ml_sig.encode();
     Ok(Signature(Bytes::copy_from_slice(encoded.as_ref())))
 }
@@ -163,26 +194,34 @@ pub fn sign_dsa(secret_key: &[u8], message: &[u8]) -> Result<Signature, CryptoEr
 /// Returns [`CryptoError::InvalidKeyLength`] if `public_key` is not 2592
 /// bytes. Returns [`CryptoError::VerificationFailed`] if the signature
 /// bytes are malformed.
-pub fn verify_dsa(
-    public_key: &[u8],
-    message: &[u8],
-    sig: &Signature,
-) -> Result<bool, CryptoError> {
+pub fn verify_dsa(public_key: &[u8], message: &[u8], sig: &Signature) -> Result<bool, CryptoError> {
     if public_key.len() != DSA_VK_LEN {
-        return Err(CryptoError::InvalidKeyLength { expected: DSA_VK_LEN, got: public_key.len() });
+        return Err(CryptoError::InvalidKeyLength {
+            expected: DSA_VK_LEN,
+            got: public_key.len(),
+        });
     }
-    let enc_vk: EncodedVerifyingKey<MlDsa87> = public_key
-        .try_into()
-        .map_err(|_| CryptoError::InvalidKeyLength { expected: DSA_VK_LEN, got: public_key.len() })?;
+    let enc_vk: EncodedVerifyingKey<MlDsa87> =
+        public_key
+            .try_into()
+            .map_err(|_| CryptoError::InvalidKeyLength {
+                expected: DSA_VK_LEN,
+                got: public_key.len(),
+            })?;
     let vk = VerifyingKey::<MlDsa87>::decode(&enc_vk);
 
-    let enc_sig: EncodedSignature<MlDsa87> = sig
-        .0
-        .as_ref()
-        .try_into()
-        .map_err(|_| CryptoError::VerificationFailed { reason: "invalid signature length".into() })?;
-    let ml_sig = ml_dsa::Signature::<MlDsa87>::decode(&enc_sig)
-        .ok_or_else(|| CryptoError::VerificationFailed { reason: "malformed signature bytes".into() })?;
+    let enc_sig: EncodedSignature<MlDsa87> =
+        sig.0
+            .as_ref()
+            .try_into()
+            .map_err(|_| CryptoError::VerificationFailed {
+                reason: "invalid signature length".into(),
+            })?;
+    let ml_sig = ml_dsa::Signature::<MlDsa87>::decode(&enc_sig).ok_or_else(|| {
+        CryptoError::VerificationFailed {
+            reason: "malformed signature bytes".into(),
+        }
+    })?;
 
     Ok(vk.verify_with_context(message, b"", &ml_sig))
 }
@@ -197,11 +236,7 @@ pub fn verify_dsa(
 /// Returns [`CryptoError::InvalidKeyLength`] if `key` is not 32 bytes,
 /// [`CryptoError::InvalidNonceLength`] if `nonce` is not 12 bytes, or
 /// [`CryptoError::EncryptionFailed`] if encryption fails.
-pub fn encrypt_aes_gcm(
-    key: &[u8],
-    nonce: &[u8],
-    plaintext: &[u8],
-) -> Result<Bytes, CryptoError> {
+pub fn encrypt_aes_gcm(key: &[u8], nonce: &[u8], plaintext: &[u8]) -> Result<Bytes, CryptoError> {
     if key.len() != AES_KEY_LEN {
         return Err(CryptoError::InvalidKeyLength {
             expected: AES_KEY_LEN,
@@ -219,11 +254,12 @@ pub fn encrypt_aes_gcm(
     let cipher = Aes256Gcm::new(aes_key);
     let aes_nonce = Nonce::from_slice(nonce);
 
-    let ciphertext = cipher
-        .encrypt(aes_nonce, plaintext)
-        .map_err(|e| CryptoError::EncryptionFailed {
-            reason: e.to_string(),
-        })?;
+    let ciphertext =
+        cipher
+            .encrypt(aes_nonce, plaintext)
+            .map_err(|e| CryptoError::EncryptionFailed {
+                reason: e.to_string(),
+            })?;
 
     Ok(Bytes::from(ciphertext))
 }
@@ -234,11 +270,7 @@ pub fn encrypt_aes_gcm(
 /// Returns [`CryptoError::InvalidKeyLength`] if `key` is not 32 bytes,
 /// [`CryptoError::InvalidNonceLength`] if `nonce` is not 12 bytes, or
 /// [`CryptoError::DecryptionFailed`] if decryption or authentication fails.
-pub fn decrypt_aes_gcm(
-    key: &[u8],
-    nonce: &[u8],
-    ciphertext: &[u8],
-) -> Result<Bytes, CryptoError> {
+pub fn decrypt_aes_gcm(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Bytes, CryptoError> {
     if key.len() != AES_KEY_LEN {
         return Err(CryptoError::InvalidKeyLength {
             expected: AES_KEY_LEN,
@@ -256,11 +288,12 @@ pub fn decrypt_aes_gcm(
     let cipher = Aes256Gcm::new(aes_key);
     let aes_nonce = Nonce::from_slice(nonce);
 
-    let plaintext = cipher
-        .decrypt(aes_nonce, ciphertext)
-        .map_err(|e| CryptoError::DecryptionFailed {
-            reason: e.to_string(),
-        })?;
+    let plaintext =
+        cipher
+            .decrypt(aes_nonce, ciphertext)
+            .map_err(|e| CryptoError::DecryptionFailed {
+                reason: e.to_string(),
+            })?;
 
     Ok(Bytes::from(plaintext))
 }
@@ -282,22 +315,17 @@ pub fn derive_key(password: &[u8], salt: &[u8], output_len: usize) -> Result<Byt
     }
 
     // Argon2id parameters: time_cost=3, mem_cost=65536 KiB, parallelism=4
-    let params = Params::new(65536, 3, 4, Some(output_len))
-        .map_err(|e| CryptoError::KdfFailed {
+    let params =
+        Params::new(65536, 3, 4, Some(output_len)).map_err(|e| CryptoError::KdfFailed {
             reason: e.to_string(),
         })?;
 
-    let argon2 = Argon2::new(
-        argon2::Algorithm::Argon2id,
-        argon2::Version::V0x13,
-        params,
-    );
+    let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
 
     // Create a SaltString from the provided salt
-    let salt_str = SaltString::encode_b64(salt)
-        .map_err(|e| CryptoError::KdfFailed {
-            reason: e.to_string(),
-        })?;
+    let salt_str = SaltString::encode_b64(salt).map_err(|e| CryptoError::KdfFailed {
+        reason: e.to_string(),
+    })?;
 
     let hash = argon2
         .hash_password(password, &salt_str)
@@ -360,15 +388,24 @@ pub fn encrypt_payload(
 
     // 6. Build final output: [kem_ct_len][kem_ct][salt][nonce][sym_ct_len][sym_ct][sig_len][sig]
     let mut output = BytesMut::new();
-    #[expect(clippy::cast_possible_truncation, reason = "ML-KEM-1024 ciphertext is 1568 bytes")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "ML-KEM-1024 ciphertext is 1568 bytes"
+    )]
     output.put_u32(kem_ct.len() as u32);
     output.put(kem_ct);
     output.put_slice(&salt);
     output.put_slice(&nonce);
-    #[expect(clippy::cast_possible_truncation, reason = "payload sizes are bounded by protocol")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "payload sizes are bounded by protocol"
+    )]
     output.put_u32(sym_ct.len() as u32);
     output.put(sym_ct);
-    #[expect(clippy::cast_possible_truncation, reason = "ML-DSA-87 signature is 4595 bytes")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "ML-DSA-87 signature is 4595 bytes"
+    )]
     output.put_u32(signature.0.len() as u32);
     output.put(signature.0);
 
@@ -389,74 +426,62 @@ pub fn decrypt_payload(
     encrypted: &[u8],
 ) -> Result<Payload, CryptoError> {
     let mut cursor = encrypted;
+    let truncated = |field: &str| CryptoError::DecryptionFailed {
+        reason: format!("truncated {field}"),
+    };
 
     // 1. Parse KEM ciphertext
-    if cursor.len() < 4 {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated kem_ct_len".into(),
-        });
-    }
-    let kem_ct_len = u32::from_be_bytes([cursor[0], cursor[1], cursor[2], cursor[3]]) as usize;
-    cursor = &cursor[4..];
-
-    if cursor.len() < kem_ct_len {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated kem_ct".into(),
-        });
-    }
-    let kem_ct = &cursor[..kem_ct_len];
-    cursor = &cursor[kem_ct_len..];
+    let kem_ct_len = {
+        let b = cursor.get(..4).ok_or_else(|| truncated("kem_ct_len"))?;
+        let arr = <[u8; 4]>::try_from(b).map_err(|_| truncated("kem_ct_len"))?;
+        cursor = cursor.get(4..).ok_or_else(|| truncated("kem_ct_len"))?;
+        u32::from_be_bytes(arr) as usize
+    };
+    let kem_ct = cursor
+        .get(..kem_ct_len)
+        .ok_or_else(|| truncated("kem_ct"))?;
+    cursor = cursor
+        .get(kem_ct_len..)
+        .ok_or_else(|| truncated("kem_ct"))?;
 
     // 2. Parse salt
-    if cursor.len() < ARGON2_SALT_LEN {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated salt".into(),
-        });
-    }
-    let salt = &cursor[..ARGON2_SALT_LEN];
-    cursor = &cursor[ARGON2_SALT_LEN..];
+    let salt = cursor
+        .get(..ARGON2_SALT_LEN)
+        .ok_or_else(|| truncated("salt"))?;
+    cursor = cursor
+        .get(ARGON2_SALT_LEN..)
+        .ok_or_else(|| truncated("salt"))?;
 
     // 3. Parse nonce
-    if cursor.len() < AES_NONCE_LEN {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated nonce".into(),
-        });
-    }
-    let nonce = &cursor[..AES_NONCE_LEN];
-    cursor = &cursor[AES_NONCE_LEN..];
+    let nonce = cursor
+        .get(..AES_NONCE_LEN)
+        .ok_or_else(|| truncated("nonce"))?;
+    cursor = cursor
+        .get(AES_NONCE_LEN..)
+        .ok_or_else(|| truncated("nonce"))?;
 
     // 4. Parse symmetric ciphertext
-    if cursor.len() < 4 {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated sym_ct_len".into(),
-        });
-    }
-    let sym_ct_len = u32::from_be_bytes([cursor[0], cursor[1], cursor[2], cursor[3]]) as usize;
-    cursor = &cursor[4..];
-
-    if cursor.len() < sym_ct_len {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated sym_ct".into(),
-        });
-    }
-    let sym_ct = &cursor[..sym_ct_len];
-    cursor = &cursor[sym_ct_len..];
+    let sym_ct_len = {
+        let b = cursor.get(..4).ok_or_else(|| truncated("sym_ct_len"))?;
+        let arr = <[u8; 4]>::try_from(b).map_err(|_| truncated("sym_ct_len"))?;
+        cursor = cursor.get(4..).ok_or_else(|| truncated("sym_ct_len"))?;
+        u32::from_be_bytes(arr) as usize
+    };
+    let sym_ct = cursor
+        .get(..sym_ct_len)
+        .ok_or_else(|| truncated("sym_ct"))?;
+    cursor = cursor
+        .get(sym_ct_len..)
+        .ok_or_else(|| truncated("sym_ct"))?;
 
     // 5. Parse signature
-    if cursor.len() < 4 {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated sig_len".into(),
-        });
-    }
-    let sig_len = u32::from_be_bytes([cursor[0], cursor[1], cursor[2], cursor[3]]) as usize;
-    cursor = &cursor[4..];
-
-    if cursor.len() < sig_len {
-        return Err(CryptoError::DecryptionFailed {
-            reason: "truncated sig".into(),
-        });
-    }
-    let sig_bytes = &cursor[..sig_len];
+    let sig_len = {
+        let b = cursor.get(..4).ok_or_else(|| truncated("sig_len"))?;
+        let arr = <[u8; 4]>::try_from(b).map_err(|_| truncated("sig_len"))?;
+        cursor = cursor.get(4..).ok_or_else(|| truncated("sig_len"))?;
+        u32::from_be_bytes(arr) as usize
+    };
+    let sig_bytes = cursor.get(..sig_len).ok_or_else(|| truncated("sig"))?;
     let signature = Signature(Bytes::copy_from_slice(sig_bytes));
 
     // 6. Verify signature over (kem_ct || salt || nonce || sym_ct)
@@ -496,6 +521,8 @@ mod tests {
 
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     fn rng() -> ChaCha20Rng {
         ChaCha20Rng::from_rng(&mut rand::rng())
     }
@@ -504,126 +531,157 @@ mod tests {
 
     /// KEM round-trip: shared secrets from encapsulate and decapsulate must match.
     #[test]
-    fn test_kem_roundtrip() {
-        let kp = generate_kem_keypair(&mut rng()).expect("keygen");
-        let (ct, ss_send) = encapsulate_kem(&kp.public_key, &mut rng()).expect("enc");
-        let ss_recv = decapsulate_kem(&kp.secret_key, &ct).expect("dec");
+    fn test_kem_roundtrip() -> TestResult {
+        let kp = generate_kem_keypair(&mut rng())?;
+        let (ct, ss_send) = encapsulate_kem(&kp.public_key, &mut rng())?;
+        let ss_recv = decapsulate_kem(&kp.secret_key, &ct)?;
 
         let eq = ss_send.as_ref().ct_eq(ss_recv.as_ref()).unwrap_u8();
         assert_eq!(eq, 1u8, "shared secrets must match");
+        Ok(())
     }
 
     /// Invalid ciphertext must not produce the correct shared secret
     /// (ML-KEM uses implicit rejection — not an error, but a different key).
     #[test]
-    fn test_kem_wrong_ciphertext_differs() {
-        let kp = generate_kem_keypair(&mut rng()).expect("keygen");
-        let (ct, ss_good) = encapsulate_kem(&kp.public_key, &mut rng()).expect("enc");
+    fn test_kem_wrong_ciphertext_differs() -> TestResult {
+        let kp = generate_kem_keypair(&mut rng())?;
+        let (ct, ss_good) = encapsulate_kem(&kp.public_key, &mut rng())?;
         // Flip first byte to corrupt ciphertext
         let mut ct_vec = ct.to_vec();
-        ct_vec[0] ^= 0xFF;
-        let ss_bad = decapsulate_kem(&kp.secret_key, &ct_vec).expect("dec");
+        let first = ct_vec.first_mut().ok_or("empty ciphertext")?;
+        *first ^= 0xFF;
+        let ss_bad = decapsulate_kem(&kp.secret_key, &ct_vec)?;
 
         let eq = ss_good.as_ref().ct_eq(ss_bad.as_ref()).unwrap_u8();
-        assert_eq!(eq, 0u8, "corrupted ciphertext must yield a different shared secret");
+        assert_eq!(
+            eq, 0u8,
+            "corrupted ciphertext must yield a different shared secret"
+        );
+        Ok(())
     }
 
     /// Wrong public key length must return `InvalidKeyLength`.
     #[test]
     fn test_kem_bad_pubkey_length() {
-        let err = encapsulate_kem(&[0u8; 42], &mut rng()).unwrap_err();
-        assert!(matches!(err, CryptoError::InvalidKeyLength { .. }));
+        let result = encapsulate_kem(&[0u8; 42], &mut rng());
+        assert!(matches!(result, Err(CryptoError::InvalidKeyLength { .. })));
     }
 
     /// Wrong secret key length must return `InvalidKeyLength`.
     #[test]
     fn test_kem_bad_seckey_length() {
         let ct = Bytes::from(vec![0u8; 1568]);
-        let err = decapsulate_kem(&[0u8; 42], &ct).unwrap_err();
-        assert!(matches!(err, CryptoError::InvalidKeyLength { .. }));
+        let result = decapsulate_kem(&[0u8; 42], &ct);
+        assert!(matches!(result, Err(CryptoError::InvalidKeyLength { .. })));
     }
 
     /// Key pair byte sizes must match ML-KEM-1024 FIPS 203 specification.
     #[test]
-    fn test_kem_keypair_sizes() {
-        let kp = generate_kem_keypair(&mut rng()).expect("keygen");
-        assert_eq!(kp.secret_key.len(), KEM_SEED_LEN, "KEM seed must be 64 bytes");
-        assert_eq!(kp.public_key.len(), KEM_EK_LEN, "KEM enc key must be 1568 bytes");
+    fn test_kem_keypair_sizes() -> TestResult {
+        let kp = generate_kem_keypair(&mut rng())?;
+        assert_eq!(
+            kp.secret_key.len(),
+            KEM_SEED_LEN,
+            "KEM seed must be 64 bytes"
+        );
+        assert_eq!(
+            kp.public_key.len(),
+            KEM_EK_LEN,
+            "KEM enc key must be 1568 bytes"
+        );
+        Ok(())
     }
 
     // ─── ML-DSA ───────────────────────────────────────────────────────────────
 
     /// DSA round-trip: sign then verify must return `true`.
     #[test]
-    fn test_dsa_roundtrip() {
-        let kp = generate_dsa_keypair(&mut rng()).expect("keygen");
+    fn test_dsa_roundtrip() -> TestResult {
+        let kp = generate_dsa_keypair(&mut rng())?;
         let msg = b"the quick brown fox jumps over the lazy dog";
-        let sig = sign_dsa(&kp.secret_key, msg).expect("sign");
-        let ok = verify_dsa(&kp.public_key, msg, &sig).expect("verify");
+        let sig = sign_dsa(&kp.secret_key, msg)?;
+        let ok = verify_dsa(&kp.public_key, msg, &sig)?;
         assert!(ok, "valid signature must verify");
+        Ok(())
     }
 
     /// Tampered signature must not verify.
     #[test]
-    fn test_dsa_tamper() {
-        let kp = generate_dsa_keypair(&mut rng()).expect("keygen");
+    fn test_dsa_tamper() -> TestResult {
+        let kp = generate_dsa_keypair(&mut rng())?;
         let msg = b"the quick brown fox jumps over the lazy dog";
-        let sig = sign_dsa(&kp.secret_key, msg).expect("sign");
+        let sig = sign_dsa(&kp.secret_key, msg)?;
         let mut sig_bytes = sig.0.to_vec();
-        sig_bytes[0] ^= 0xFF;
+        let first = sig_bytes.first_mut().ok_or("empty signature")?;
+        *first ^= 0xFF;
         let tampered_sig = Signature(Bytes::from(sig_bytes));
         let result = verify_dsa(&kp.public_key, msg, &tampered_sig);
-        match result {
-            Ok(false) | Err(_) => {}
-            Ok(true) => panic!("tampered signature must not verify"),
-        }
+        assert!(
+            matches!(result, Ok(false) | Err(_)),
+            "tampered signature must not verify"
+        );
+        Ok(())
     }
 
     /// Signature under a different public key must not verify.
     #[test]
-    fn test_dsa_wrong_key() {
-        let kp1 = generate_dsa_keypair(&mut rng()).expect("keygen 1");
-        let kp2 = generate_dsa_keypair(&mut rng()).expect("keygen 2");
+    fn test_dsa_wrong_key() -> TestResult {
+        let kp1 = generate_dsa_keypair(&mut rng())?;
+        let kp2 = generate_dsa_keypair(&mut rng())?;
         let msg = b"the quick brown fox jumps over the lazy dog";
-        let sig = sign_dsa(&kp1.secret_key, msg).expect("sign");
+        let sig = sign_dsa(&kp1.secret_key, msg)?;
         let result = verify_dsa(&kp2.public_key, msg, &sig);
-        match result {
-            Ok(false) | Err(_) => {}
-            Ok(true) => panic!("sig must not verify under a different key"),
-        }
+        assert!(
+            matches!(result, Ok(false) | Err(_)),
+            "sig must not verify under a different key"
+        );
+        Ok(())
     }
 
     /// Key pair byte sizes must match ML-DSA-87 FIPS 204 specification.
     #[test]
-    fn test_dsa_keypair_sizes() {
-        let kp = generate_dsa_keypair(&mut rng()).expect("keygen");
-        assert_eq!(kp.secret_key.len(), DSA_SEED_LEN, "DSA seed must be 32 bytes");
-        assert_eq!(kp.public_key.len(), DSA_VK_LEN, "DSA verifying key must be 2592 bytes");
+    fn test_dsa_keypair_sizes() -> TestResult {
+        let kp = generate_dsa_keypair(&mut rng())?;
+        assert_eq!(
+            kp.secret_key.len(),
+            DSA_SEED_LEN,
+            "DSA seed must be 32 bytes"
+        );
+        assert_eq!(
+            kp.public_key.len(),
+            DSA_VK_LEN,
+            "DSA verifying key must be 2592 bytes"
+        );
+        Ok(())
     }
 
     // ─── AES-256-GCM ──────────────────────────────────────────────────────────
 
     /// AES-256-GCM round-trip: encrypt then decrypt yields original plaintext.
     #[test]
-    fn test_aes_roundtrip() {
+    fn test_aes_roundtrip() -> TestResult {
         let key = vec![0u8; AES_KEY_LEN];
         let nonce = vec![1u8; AES_NONCE_LEN];
         let plaintext = b"the quick brown fox";
-        let ciphertext = encrypt_aes_gcm(&key, &nonce, plaintext).expect("encrypt");
-        let recovered = decrypt_aes_gcm(&key, &nonce, &ciphertext).expect("decrypt");
+        let ciphertext = encrypt_aes_gcm(&key, &nonce, plaintext)?;
+        let recovered = decrypt_aes_gcm(&key, &nonce, &ciphertext)?;
         assert_eq!(recovered.as_ref(), plaintext);
+        Ok(())
     }
 
     /// Tampered ciphertext must fail authentication.
     #[test]
-    fn test_aes_tamper() {
+    fn test_aes_tamper() -> TestResult {
         let key = vec![0u8; AES_KEY_LEN];
         let nonce = vec![1u8; AES_NONCE_LEN];
         let plaintext = b"the quick brown fox";
-        let mut ciphertext = encrypt_aes_gcm(&key, &nonce, plaintext).expect("encrypt").to_vec();
-        ciphertext[0] ^= 0xFF;
+        let mut ciphertext = encrypt_aes_gcm(&key, &nonce, plaintext)?.to_vec();
+        let first = ciphertext.first_mut().ok_or("empty ciphertext")?;
+        *first ^= 0xFF;
         let result = decrypt_aes_gcm(&key, &nonce, &ciphertext);
         assert!(result.is_err(), "tampered ciphertext must fail to decrypt");
+        Ok(())
     }
 
     /// Wrong key length must return `InvalidKeyLength`.
@@ -632,8 +690,8 @@ mod tests {
         let key = vec![0u8; 16]; // Wrong length
         let nonce = vec![1u8; AES_NONCE_LEN];
         let plaintext = b"test";
-        let err = encrypt_aes_gcm(&key, &nonce, plaintext).unwrap_err();
-        assert!(matches!(err, CryptoError::InvalidKeyLength { .. }));
+        let result = encrypt_aes_gcm(&key, &nonce, plaintext);
+        assert!(matches!(result, Err(CryptoError::InvalidKeyLength { .. })));
     }
 
     /// Wrong nonce length must return `InvalidNonceLength`.
@@ -642,95 +700,100 @@ mod tests {
         let key = vec![0u8; AES_KEY_LEN];
         let nonce = vec![1u8; 8]; // Wrong length
         let plaintext = b"test";
-        let err = encrypt_aes_gcm(&key, &nonce, plaintext).unwrap_err();
-        assert!(matches!(err, CryptoError::InvalidNonceLength { .. }));
+        let result = encrypt_aes_gcm(&key, &nonce, plaintext);
+        assert!(matches!(
+            result,
+            Err(CryptoError::InvalidNonceLength { .. })
+        ));
     }
 
     // ─── Argon2id KDF ─────────────────────────────────────────────────────────
 
     /// Argon2id must produce deterministic output for same password + salt.
     #[test]
-    fn test_kdf_deterministic() {
+    fn test_kdf_deterministic() -> TestResult {
         let password = b"password123";
         let salt = vec![0u8; ARGON2_SALT_LEN];
-        let key1 = derive_key(password, &salt, AES_KEY_LEN).expect("kdf 1");
-        let key2 = derive_key(password, &salt, AES_KEY_LEN).expect("kdf 2");
+        let key1 = derive_key(password, &salt, AES_KEY_LEN)?;
+        let key2 = derive_key(password, &salt, AES_KEY_LEN)?;
         assert_eq!(key1.as_ref(), key2.as_ref(), "KDF must be deterministic");
+        Ok(())
     }
 
     /// Argon2id must produce different output for different passwords.
     #[test]
-    fn test_kdf_different_passwords() {
+    fn test_kdf_different_passwords() -> TestResult {
         let salt = vec![0u8; ARGON2_SALT_LEN];
-        let key1 = derive_key(b"password1", &salt, AES_KEY_LEN).expect("kdf 1");
-        let key2 = derive_key(b"password2", &salt, AES_KEY_LEN).expect("kdf 2");
-        assert_ne!(key1.as_ref(), key2.as_ref(), "different passwords must yield different keys");
+        let key1 = derive_key(b"password1", &salt, AES_KEY_LEN)?;
+        let key2 = derive_key(b"password2", &salt, AES_KEY_LEN)?;
+        assert_ne!(
+            key1.as_ref(),
+            key2.as_ref(),
+            "different passwords must yield different keys"
+        );
+        Ok(())
     }
 
     /// Argon2id must produce different output for different salts.
     #[test]
-    fn test_kdf_different_salts() {
+    fn test_kdf_different_salts() -> TestResult {
         let password = b"password123";
         let salt1 = vec![0u8; ARGON2_SALT_LEN];
         let salt2 = vec![1u8; ARGON2_SALT_LEN];
-        let key1 = derive_key(password, &salt1, AES_KEY_LEN).expect("kdf 1");
-        let key2 = derive_key(password, &salt2, AES_KEY_LEN).expect("kdf 2");
-        assert_ne!(key1.as_ref(), key2.as_ref(), "different salts must yield different keys");
+        let key1 = derive_key(password, &salt1, AES_KEY_LEN)?;
+        let key2 = derive_key(password, &salt2, AES_KEY_LEN)?;
+        assert_ne!(
+            key1.as_ref(),
+            key2.as_ref(),
+            "different salts must yield different keys"
+        );
+        Ok(())
     }
 
     // ─── Full Pipeline ────────────────────────────────────────────────────────
 
     /// Full pipeline round-trip: encrypt then decrypt yields original payload.
     #[test]
-    fn test_pipeline_roundtrip() {
-        let kem_kp = generate_kem_keypair(&mut rng()).expect("kem keygen");
-        let dsa_kp = generate_dsa_keypair(&mut rng()).expect("dsa keygen");
+    fn test_pipeline_roundtrip() -> TestResult {
+        let kem_kp = generate_kem_keypair(&mut rng())?;
+        let dsa_kp = generate_dsa_keypair(&mut rng())?;
         let payload = crate::domain::types::Payload::from_bytes(b"secret message".to_vec());
 
-        let encrypted = encrypt_payload(
-            &kem_kp.public_key,
-            &dsa_kp.secret_key,
-            &payload,
-            &mut rng(),
-        )
-        .expect("encrypt");
+        let encrypted =
+            encrypt_payload(&kem_kp.public_key, &dsa_kp.secret_key, &payload, &mut rng())?;
 
-        let recovered = decrypt_payload(&kem_kp.secret_key, &dsa_kp.public_key, &encrypted)
-            .expect("decrypt");
+        let recovered = decrypt_payload(&kem_kp.secret_key, &dsa_kp.public_key, &encrypted)?;
 
         assert_eq!(recovered.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     /// Full pipeline with tampered ciphertext must fail signature verification.
     #[test]
-    fn test_pipeline_tamper() {
-        let kem_kp = generate_kem_keypair(&mut rng()).expect("kem keygen");
-        let dsa_kp = generate_dsa_keypair(&mut rng()).expect("dsa keygen");
+    fn test_pipeline_tamper() -> TestResult {
+        let kem_kp = generate_kem_keypair(&mut rng())?;
+        let dsa_kp = generate_dsa_keypair(&mut rng())?;
         let payload = crate::domain::types::Payload::from_bytes(b"secret message".to_vec());
 
-        let mut encrypted = encrypt_payload(
-            &kem_kp.public_key,
-            &dsa_kp.secret_key,
-            &payload,
-            &mut rng(),
-        )
-        .expect("encrypt")
-        .to_vec();
+        let mut encrypted =
+            encrypt_payload(&kem_kp.public_key, &dsa_kp.secret_key, &payload, &mut rng())?.to_vec();
 
         // Tamper with a byte in the middle
         let mid = encrypted.len() / 2;
-        encrypted[mid] ^= 0xFF;
+        let byte = encrypted.get_mut(mid).ok_or("empty encrypted data")?;
+        *byte ^= 0xFF;
 
         let result = decrypt_payload(&kem_kp.secret_key, &dsa_kp.public_key, &encrypted);
         assert!(result.is_err(), "tampered payload must fail to decrypt");
+        Ok(())
     }
 
     /// Full pipeline with wrong DSA key must fail signature verification.
     #[test]
-    fn test_pipeline_wrong_dsa_key() {
-        let kem_kp = generate_kem_keypair(&mut rng()).expect("kem keygen");
-        let dsa_kp1 = generate_dsa_keypair(&mut rng()).expect("dsa keygen 1");
-        let dsa_kp2 = generate_dsa_keypair(&mut rng()).expect("dsa keygen 2");
+    fn test_pipeline_wrong_dsa_key() -> TestResult {
+        let kem_kp = generate_kem_keypair(&mut rng())?;
+        let dsa_kp1 = generate_dsa_keypair(&mut rng())?;
+        let dsa_kp2 = generate_dsa_keypair(&mut rng())?;
         let payload = crate::domain::types::Payload::from_bytes(b"secret message".to_vec());
 
         let encrypted = encrypt_payload(
@@ -738,10 +801,10 @@ mod tests {
             &dsa_kp1.secret_key,
             &payload,
             &mut rng(),
-        )
-        .expect("encrypt");
+        )?;
 
         let result = decrypt_payload(&kem_kp.secret_key, &dsa_kp2.public_key, &encrypted);
         assert!(result.is_err(), "wrong DSA key must fail verification");
+        Ok(())
     }
 }

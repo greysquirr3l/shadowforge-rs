@@ -45,6 +45,8 @@ impl StyloScrubber for StyloScrubberImpl {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     fn profile() -> StyloProfile {
         StyloProfile {
             target_vocab_size: 5000,
@@ -54,49 +56,48 @@ mod tests {
     }
 
     #[test]
-    fn scrub_via_adapter() {
+    fn scrub_via_adapter() -> TestResult {
         let scrubber = StyloScrubberImpl::new();
         let input = "Don\u{2019}t worry\u{2014}it\u{2019}s fine!";
-        let result = scrubber
-            .scrub(input, &profile())
-            .expect("scrub should succeed");
+        let result = scrubber.scrub(input, &profile())?;
         assert!(result.contains("do not"));
         assert!(result.contains("it is"));
         assert!(!result.contains('\u{2014}'));
+        Ok(())
     }
 
     #[test]
-    fn scrub_empty_returns_empty() {
+    fn scrub_empty_returns_empty() -> TestResult {
         let scrubber = StyloScrubberImpl::new();
-        let result = scrubber
-            .scrub("", &profile())
-            .expect("scrub should succeed");
+        let result = scrubber.scrub("", &profile())?;
         assert!(result.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn scrub_idempotent_via_adapter() {
+    fn scrub_idempotent_via_adapter() -> TestResult {
         let scrubber = StyloScrubberImpl::new();
         let input = "\u{201C}They\u{2019}re coming,\u{201D} she whispered\u{2026}";
-        let once = scrubber.scrub(input, &profile()).expect("first scrub");
-        let twice = scrubber.scrub(&once, &profile()).expect("second scrub");
+        let once = scrubber.scrub(input, &profile())?;
+        let twice = scrubber.scrub(&once, &profile())?;
         assert_eq!(once, twice);
+        Ok(())
     }
 
     #[test]
-    fn scrub_preserves_non_latin() {
+    fn scrub_preserves_non_latin() -> TestResult {
         let scrubber = StyloScrubberImpl::new();
         let input = "\u{0645}\u{0631}\u{062D}\u{0628}\u{0627} \u{0628}\u{0627}\u{0644}\u{0639}\u{0627}\u{0644}\u{0645}";
-        let result = scrubber.scrub(input, &profile()).expect("scrub arabic");
+        let result = scrubber.scrub(input, &profile())?;
         assert!(!result.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn default_impl() {
-        let scrubber = StyloScrubberImpl::default();
-        let result = scrubber
-            .scrub("hello world", &profile())
-            .expect("scrub should succeed");
+    fn default_impl() -> TestResult {
+        let scrubber = StyloScrubberImpl;
+        let result = scrubber.scrub("hello world", &profile())?;
         assert_eq!(result, "hello world");
+        Ok(())
     }
 }

@@ -52,6 +52,9 @@ completions/
 .env.local
 /corpus-index/
 
+# ─── Documentation Build Output ────────────────────────────────────────────────
+/docs/book/
+
 # ─── Coverage ──────────────────────────────────────────────────────────────────
 /coverage/
 coverage/
@@ -62,6 +65,7 @@ lcov.info
 
 # ─── Internal Docs / Planning ─────────────────────────────────────────────────
 IMPLEMENTATION_PLAN.md
+OPERATIONAL_SECURITY.md
 plan.toml
 PROGRESS.md
 rust-catchup-1.78-1.94.1.md

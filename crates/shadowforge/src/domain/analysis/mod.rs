@@ -75,7 +75,11 @@ pub fn chi_square_score(data: &[u8]) -> f64 {
     // Build byte histogram (256 bins)
     let mut histogram = [0u64; 256];
     for &b in data {
-        histogram[usize::from(b)] = histogram[usize::from(b)].strict_add(1);
+        // usize::from(u8) is always 0..=255, histogram has 256 entries
+        #[expect(clippy::indexing_slicing, reason = "u8 index into [_; 256] cannot be out of bounds")]
+        {
+            histogram[usize::from(b)] = histogram[usize::from(b)].strict_add(1);
+        }
     }
 
     let expected = data.len() as f64 / 256.0;

@@ -621,6 +621,8 @@ impl std::fmt::Debug for WatermarkTripwireTag {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
     fn capacity_insufficient_when_payload_exceeds_limit() {
         let cap = Capacity {
@@ -642,41 +644,44 @@ mod tests {
     }
 
     #[test]
-    fn payload_from_str_utf8_round_trips() {
-        let p = Payload::from_str_utf8("hello").expect("infallible");
+    fn payload_from_str_utf8_round_trips() -> TestResult {
+        let p = Payload::from_str_utf8("hello")?;
         assert_eq!(p.as_bytes(), b"hello");
-    }
+        Ok(())
+}
 
     #[test]
-    fn shard_round_trips_through_serde_json() {
+    fn shard_round_trips_through_serde_json() -> TestResult {
         let original = Shard {
             index: 2,
             total: 5,
             data: vec![1, 2, 3, 4],
             hmac_tag: [0xAB; 32],
         };
-        let json = serde_json::to_string(&original).expect("serialize");
-        let decoded: Shard = serde_json::from_str(&json).expect("deserialize");
+        let json = serde_json::to_string(&original)?;
+        let decoded: Shard = serde_json::from_str(&json)?;
         assert_eq!(decoded.index, 2);
         assert_eq!(decoded.total, 5);
         assert_eq!(decoded.data, &[1, 2, 3, 4]);
         assert_eq!(decoded.hmac_tag, [0xAB; 32]);
-    }
+        Ok(())
+}
 
     #[test]
-    fn watermark_receipt_display_contains_heading() {
+    fn watermark_receipt_display_contains_heading() -> TestResult {
         let receipt = WatermarkReceipt {
             recipient: "alice".into(),
             algorithm: "lsb".into(),
             shards: vec![0, 1, 2],
-            created_at: DateTime::from_timestamp(0, 0).expect("valid"),
+            created_at: DateTime::from_timestamp(0, 0).ok_or("invalid timestamp")?,
         };
         let s = receipt.to_string();
         assert!(s.contains("# Watermark Receipt"), "missing heading in: {s}");
-    }
+        Ok(())
+}
 
     #[test]
-    fn geographic_manifest_serialises_roundtrip() {
+    fn geographic_manifest_serialises_roundtrip() -> TestResult {
         let manifest = GeographicManifest {
             shards: vec![
                 GeoShardEntry {
@@ -692,12 +697,13 @@ mod tests {
             ],
             minimum_jurisdictions: 2,
         };
-        let json = serde_json::to_string(&manifest).expect("serialize");
-        let decoded: GeographicManifest = serde_json::from_str(&json).expect("deserialize");
+        let json = serde_json::to_string(&manifest)?;
+        let decoded: GeographicManifest = serde_json::from_str(&json)?;
         assert_eq!(decoded.minimum_jurisdictions, 2);
         assert_eq!(decoded.shards.len(), 2);
-        assert_eq!(decoded.shards[0].jurisdiction, "DE");
-    }
+        assert_eq!(decoded.shards.first().ok_or("no shards")?.jurisdiction, "DE");
+        Ok(())
+}
 
     #[test]
     fn deniable_key_set_both_keys_zeroized_on_explicit_call() {
@@ -731,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_report_serialises() {
+    fn analysis_report_serialises() -> TestResult {
         let report = AnalysisReport {
             technique: StegoTechnique::DctJpeg,
             cover_capacity: Capacity {
@@ -742,8 +748,9 @@ mod tests {
             detectability_risk: DetectabilityRisk::Low,
             recommended_max_payload_bytes: 512,
         };
-        let json = serde_json::to_string(&report).expect("serialize");
+        let json = serde_json::to_string(&report)?;
         assert!(json.contains("DctJpeg"));
         assert!(json.contains("Low"));
-    }
+        Ok(())
+}
 }

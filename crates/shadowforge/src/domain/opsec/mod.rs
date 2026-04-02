@@ -245,9 +245,13 @@ pub fn embed_watermark(
     let mut data = cover.data.to_vec();
 
     for (bit_idx, &pos) in positions.iter().enumerate() {
+        // bit_idx < MARKER_BITS = 32, so bit_idx/8 < 4 = MARKER_PATTERN.len()
+        #[expect(clippy::indexing_slicing, reason = "bit_idx < MARKER_BITS; pos validated by derive_positions")]
         let marker_byte = MARKER_PATTERN[bit_idx / 8];
         let bit = (marker_byte >> (7 - (bit_idx % 8))) & 1;
-        data[pos] = (data[pos] & 0xFE) | bit;
+        if let Some(byte) = data.get_mut(pos) {
+            *byte = (*byte & 0xFE) | bit;
+        }
     }
 
     cover.data = Bytes::from(data);
@@ -268,9 +272,11 @@ pub fn identify_watermark(cover: &CoverMedia, tags: &[WatermarkTripwireTag]) -> 
 
         let mut all_match = true;
         for (bit_idx, &pos) in positions.iter().enumerate() {
+            // bit_idx < MARKER_BITS = 32, so bit_idx/8 < 4 = MARKER_PATTERN.len()
+            #[expect(clippy::indexing_slicing, reason = "bit_idx < MARKER_BITS; pos validated by derive_positions")]
             let marker_byte = MARKER_PATTERN[bit_idx / 8];
             let expected_bit = (marker_byte >> (7 - (bit_idx % 8))) & 1;
-            let actual_bit = cover.data[pos] & 1;
+            let actual_bit = cover.data.get(pos).map_or(0xFF, |b| b & 1);
             if actual_bit != expected_bit {
                 all_match = false;
                 break;
@@ -291,6 +297,8 @@ mod tests {
     use crate::domain::errors::StegoError;
     use crate::domain::types::{Capacity, StegoTechnique};
     use std::io::Cursor;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     /// A mock embed technique that appends payload bytes to cover data.
     struct MockEmbedder;
@@ -341,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn amnesiac_embed_roundtrip() {
+    fn amnesiac_embed_roundtrip() -> TestResult {
         let cover_data = b"cover-image-bytes";
         let payload_data = b"secret-message";
 
@@ -355,16 +363,17 @@ mod tests {
             &mut output,
             &MockEmbedder,
         )
-        .expect("embed should succeed");
+        ?;
 
         // Output should contain both cover and payload bytes (mock appends)
         assert!(output.len() > cover_data.len());
         assert!(output.starts_with(cover_data));
         assert!(output.ends_with(payload_data));
-    }
+        Ok(())
+}
 
     #[test]
-    fn amnesiac_embed_empty_payload() {
+    fn amnesiac_embed_empty_payload() -> TestResult {
         let cover_data = b"cover";
         let payload_data: &[u8] = b"";
 
@@ -378,11 +387,12 @@ mod tests {
             &mut output,
             &MockEmbedder,
         )
-        .expect("embed should succeed");
+        ?;
 
         // With empty payload, output should match cover
         assert_eq!(output.as_slice(), cover_data);
-    }
+        Ok(())
+}
 
     #[test]
     fn amnesiac_embed_fails_on_bad_technique() {
@@ -404,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn amnesiac_no_heap_leak_on_success() {
+    fn amnesiac_no_heap_leak_on_success() -> TestResult {
         // Verify that we can run multiple embeds without accumulating state
         for _ in 0..10 {
             let mut cover = Cursor::new(b"cover".to_vec());
@@ -412,9 +422,10 @@ mod tests {
             let mut output = Vec::new();
 
             embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)
-                .expect("embed should succeed");
+                ?;
         }
-    }
+        Ok(())
+}
 
     // ─── Geographic Distribution Tests ────────────────────────────────────
 
@@ -442,10 +453,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_manifest_passes_sufficient_jurisdictions() {
+    fn validate_manifest_passes_sufficient_jurisdictions() -> TestResult {
         let manifest = sample_manifest();
-        validate_manifest(&manifest).expect("validation should pass");
-    }
+        validate_manifest(&manifest)?;
+        Ok(())
+}
 
     #[test]
     fn validate_manifest_fails_insufficient_jurisdictions() {
@@ -461,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn build_manifest_returns_valid() {
+    fn build_manifest_returns_valid() -> TestResult {
         let entries = vec![
             GeoShardEntry {
                 shard_index: 0,
@@ -474,9 +486,10 @@ mod tests {
                 holder_description: "Switzerland".into(),
             },
         ];
-        let manifest = build_manifest(entries, 2).expect("should build");
+        let manifest = build_manifest(entries, 2)?;
         assert_eq!(manifest.shards.len(), 2);
-    }
+        Ok(())
+}
 
     #[test]
     fn recovery_complexity_score_mentions_jurisdictions() {
@@ -526,19 +539,20 @@ mod tests {
     }
 
     #[test]
-    fn embed_then_identify_roundtrip() {
+    fn embed_then_identify_roundtrip() -> TestResult {
         let tag_a = make_tag(b"recipient-a-seed");
         let mut cover = make_cover(1024);
 
-        embed_watermark(&mut cover, &tag_a).expect("embed should succeed");
+        embed_watermark(&mut cover, &tag_a)?;
 
         let tags = [tag_a.clone()];
         let result = identify_watermark(&cover, &tags);
         assert_eq!(result, Some(0));
-    }
+        Ok(())
+}
 
     #[test]
-    fn different_tags_produce_different_covers() {
+    fn different_tags_produce_different_covers() -> TestResult {
         let tag_a = make_tag(b"seed-alpha");
         let tag_b = make_tag(b"seed-beta");
         let tag_c = make_tag(b"seed-gamma");
@@ -547,28 +561,30 @@ mod tests {
         let mut cover_b = make_cover(1024);
         let mut cover_c = make_cover(1024);
 
-        embed_watermark(&mut cover_a, &tag_a).expect("embed a");
-        embed_watermark(&mut cover_b, &tag_b).expect("embed b");
-        embed_watermark(&mut cover_c, &tag_c).expect("embed c");
+        embed_watermark(&mut cover_a, &tag_a)?;
+        embed_watermark(&mut cover_b, &tag_b)?;
+        embed_watermark(&mut cover_c, &tag_c)?;
 
         // All three should have different byte patterns
         assert_ne!(cover_a.data, cover_b.data);
         assert_ne!(cover_a.data, cover_c.data);
         assert_ne!(cover_b.data, cover_c.data);
-    }
+        Ok(())
+}
 
     #[test]
-    fn identify_picks_correct_tag() {
+    fn identify_picks_correct_tag() -> TestResult {
         let tag_a = make_tag(b"aaaa");
         let tag_b = make_tag(b"bbbb");
 
         let mut cover = make_cover(1024);
-        embed_watermark(&mut cover, &tag_b).expect("embed b");
+        embed_watermark(&mut cover, &tag_b)?;
 
         let tags = [tag_a, tag_b];
         let result = identify_watermark(&cover, &tags);
         assert_eq!(result, Some(1)); // tag_b is at index 1
-    }
+        Ok(())
+}
 
     #[test]
     fn identify_returns_none_when_no_match() {

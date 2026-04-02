@@ -111,6 +111,8 @@ mod tests {
     use bytes::Bytes;
     use std::cell::Cell;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     /// Mock embedder: prepends a 4-byte length header then payload.
     struct MockEmbedder;
 
@@ -128,6 +130,7 @@ mod tests {
 
         fn embed(&self, cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
             let mut data = cover.data.to_vec();
+            #[expect(clippy::cast_possible_truncation, reason = "test data < 4 GiB")]
             let len = payload.len() as u32;
             data.extend_from_slice(&len.to_le_bytes());
             data.extend_from_slice(payload.as_bytes());
@@ -155,17 +158,17 @@ mod tests {
                 return Err(StegoError::NoPayloadFound);
             }
             let offset = self.cover_prefix_len;
-            let len = u32::from_le_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ]) as usize;
+            let len_bytes: [u8; 4] = data
+                .get(offset..offset + 4)
+                .ok_or(StegoError::NoPayloadFound)?
+                .try_into()
+                .map_err(|_| StegoError::NoPayloadFound)?;
+            let len = u32::from_le_bytes(len_bytes) as usize;
             let start = offset + 4;
-            if start + len > data.len() {
-                return Err(StegoError::NoPayloadFound);
-            }
-            Ok(Payload::from_bytes(data[start..start + len].to_vec()))
+            let payload_data = data
+                .get(start..start + len)
+                .ok_or(StegoError::NoPayloadFound)?;
+            Ok(Payload::from_bytes(payload_data.to_vec()))
         }
     }
 
@@ -184,29 +187,26 @@ mod tests {
         parity_shards: u8,
         hmac_key: &[u8],
         cover_size: usize,
-    ) -> Vec<CoverMedia> {
-        let shards = encode_shards(payload, data_shards, parity_shards, hmac_key)
-            .expect("encoding should succeed");
+    ) -> Result<Vec<CoverMedia>, Box<dyn std::error::Error>> {
+        let shards = encode_shards(payload, data_shards, parity_shards, hmac_key)?;
         let embedder = MockEmbedder;
-        shards
+        let covers = shards
             .iter()
             .map(|shard| {
                 let cover = make_cover(cover_size);
-                // Embed the full serialized shard (index + total + hmac + data)
                 let serialized = serialize_shard(shard);
                 let shard_payload = Payload::from_bytes(serialized);
-                embedder
-                    .embed(cover, &shard_payload)
-                    .expect("embed should succeed")
+                embedder.embed(cover, &shard_payload)
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(covers)
     }
 
     #[test]
-    fn full_recovery_all_shards_present() {
+    fn full_recovery_all_shards_present() -> TestResult {
         let original = b"hello reconstruction world!";
         let hmac_key = b"test-hmac-key";
-        let covers = distribute_and_get_covers(original, 3, 2, hmac_key, 128);
+        let covers = distribute_and_get_covers(original, 3, 2, hmac_key, 128)?;
         assert_eq!(covers.len(), 5);
 
         let reconstructor = ReconstructorImpl::new(3, 2, hmac_key.to_vec(), original.len());
@@ -214,21 +214,20 @@ mod tests {
             cover_prefix_len: 128,
         };
         let progress_calls = Cell::new(0usize);
-        let result = reconstructor
-            .reconstruct(covers, &extractor, &|_done, _total| {
-                progress_calls.set(progress_calls.get().strict_add(1));
-            })
-            .expect("reconstruction should succeed");
+        let result = reconstructor.reconstruct(covers, &extractor, &|_done, _total| {
+            progress_calls.set(progress_calls.get().strict_add(1));
+        })?;
 
         assert_eq!(result.as_bytes(), original);
         assert_eq!(progress_calls.get(), 5);
+        Ok(())
     }
 
     #[test]
-    fn partial_recovery_minimum_shards() {
+    fn partial_recovery_minimum_shards() -> TestResult {
         let original = b"partial recovery test payload";
         let hmac_key = b"test-hmac-key";
-        let mut covers = distribute_and_get_covers(original, 3, 2, hmac_key, 128);
+        let mut covers = distribute_and_get_covers(original, 3, 2, hmac_key, 128)?;
         assert_eq!(covers.len(), 5);
 
         // Drop 2 parity shards (keep exactly data_shards = 3)
@@ -239,18 +238,17 @@ mod tests {
         let extractor = MockExtractor {
             cover_prefix_len: 128,
         };
-        let result = reconstructor
-            .reconstruct(covers, &extractor, &|_, _| {})
-            .expect("partial reconstruction should succeed");
+        let result = reconstructor.reconstruct(covers, &extractor, &|_, _| {})?;
 
         assert_eq!(result.as_bytes(), original);
+        Ok(())
     }
 
     #[test]
-    fn insufficient_shards_returns_error() {
+    fn insufficient_shards_returns_error() -> TestResult {
         let original = b"not enough shards";
         let hmac_key = b"test-hmac-key";
-        let mut covers = distribute_and_get_covers(original, 3, 2, hmac_key, 128);
+        let mut covers = distribute_and_get_covers(original, 3, 2, hmac_key, 128)?;
 
         // Drop 3 shards (only 2 remain, but need 3)
         covers.remove(4);
@@ -264,13 +262,14 @@ mod tests {
         let result = reconstructor.reconstruct(covers, &extractor, &|_, _| {});
 
         assert!(result.is_err());
+        Ok(())
     }
 
     #[test]
-    fn progress_callback_called_correctly() {
+    fn progress_callback_called_correctly() -> TestResult {
         let original = b"track progress";
         let hmac_key = b"test-hmac-key";
-        let covers = distribute_and_get_covers(original, 2, 1, hmac_key, 64);
+        let covers = distribute_and_get_covers(original, 2, 1, hmac_key, 64)?;
         let total_covers = covers.len();
 
         let reconstructor = ReconstructorImpl::new(2, 1, hmac_key.to_vec(), original.len());
@@ -279,11 +278,9 @@ mod tests {
         };
 
         let progress_log = std::cell::RefCell::new(Vec::new());
-        let result = reconstructor
-            .reconstruct(covers, &extractor, &|done, total| {
-                progress_log.borrow_mut().push((done, total));
-            })
-            .expect("reconstruction should succeed");
+        let result = reconstructor.reconstruct(covers, &extractor, &|done, total| {
+            progress_log.borrow_mut().push((done, total));
+        })?;
 
         assert_eq!(result.as_bytes(), original);
         let log = progress_log.borrow();
@@ -292,5 +289,6 @@ mod tests {
             assert_eq!(done, i + 1);
             assert_eq!(total, total_covers);
         }
+        Ok(())
     }
 }

@@ -36,7 +36,10 @@ impl EmbedTechnique for PdfContentStreamLsb {
         // Check if cover is a PDF
         if cover.kind != CoverMediaKind::PdfDocument {
             return Err(StegoError::UnsupportedCoverType {
-                reason: format!("PDF content-stream LSB requires PdfDocument, got {:?}", cover.kind),
+                reason: format!(
+                    "PDF content-stream LSB requires PdfDocument, got {:?}",
+                    cover.kind
+                ),
             });
         }
 
@@ -52,7 +55,10 @@ impl EmbedTechnique for PdfContentStreamLsb {
     fn embed(&self, cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
         if cover.kind != CoverMediaKind::PdfDocument {
             return Err(StegoError::UnsupportedCoverType {
-                reason: format!("PDF content-stream LSB requires PdfDocument, got {:?}", cover.kind),
+                reason: format!(
+                    "PDF content-stream LSB requires PdfDocument, got {:?}",
+                    cover.kind
+                ),
             });
         }
 
@@ -72,7 +78,10 @@ impl ExtractTechnique for PdfContentStreamLsb {
     fn extract(&self, cover: &CoverMedia) -> Result<Payload, StegoError> {
         if cover.kind != CoverMediaKind::PdfDocument {
             return Err(StegoError::UnsupportedCoverType {
-                reason: format!("PDF content-stream LSB requires PdfDocument, got {:?}", cover.kind),
+                reason: format!(
+                    "PDF content-stream LSB requires PdfDocument, got {:?}",
+                    cover.kind
+                ),
             });
         }
 
@@ -108,7 +117,10 @@ impl EmbedTechnique for PdfMetadataEmbed {
     fn capacity(&self, cover: &CoverMedia) -> Result<Capacity, StegoError> {
         if cover.kind != CoverMediaKind::PdfDocument {
             return Err(StegoError::UnsupportedCoverType {
-                reason: format!("PDF metadata embedding requires PdfDocument, got {:?}", cover.kind),
+                reason: format!(
+                    "PDF metadata embedding requires PdfDocument, got {:?}",
+                    cover.kind
+                ),
             });
         }
 
@@ -123,7 +135,10 @@ impl EmbedTechnique for PdfMetadataEmbed {
     fn embed(&self, cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
         if cover.kind != CoverMediaKind::PdfDocument {
             return Err(StegoError::UnsupportedCoverType {
-                reason: format!("PDF metadata embedding requires PdfDocument, got {:?}", cover.kind),
+                reason: format!(
+                    "PDF metadata embedding requires PdfDocument, got {:?}",
+                    cover.kind
+                ),
             });
         }
 
@@ -143,7 +158,10 @@ impl ExtractTechnique for PdfMetadataEmbed {
     fn extract(&self, cover: &CoverMedia) -> Result<Payload, StegoError> {
         if cover.kind != CoverMediaKind::PdfDocument {
             return Err(StegoError::UnsupportedCoverType {
-                reason: format!("PDF metadata embedding requires PdfDocument, got {:?}", cover.kind),
+                reason: format!(
+                    "PDF metadata embedding requires PdfDocument, got {:?}",
+                    cover.kind
+                ),
             });
         }
 
@@ -182,7 +200,7 @@ impl EmbedTechnique for LsbImage {
             _ => {
                 return Err(StegoError::UnsupportedCoverType {
                     reason: format!("LSB image requires PNG or BMP, got {:?}", cover.kind),
-                })
+                });
             }
         }
 
@@ -194,9 +212,11 @@ impl EmbedTechnique for LsbImage {
                 reason: "missing width metadata".to_string(),
             })?
             .parse()
-            .map_err(|e: std::num::ParseIntError| StegoError::MalformedCoverData {
-                reason: format!("invalid width: {e}"),
-            })?;
+            .map_err(
+                |e: std::num::ParseIntError| StegoError::MalformedCoverData {
+                    reason: format!("invalid width: {e}"),
+                },
+            )?;
 
         let height: u32 = cover
             .metadata
@@ -205,15 +225,18 @@ impl EmbedTechnique for LsbImage {
                 reason: "missing height metadata".to_string(),
             })?
             .parse()
-            .map_err(|e: std::num::ParseIntError| StegoError::MalformedCoverData {
-                reason: format!("invalid height: {e}"),
-            })?;
+            .map_err(
+                |e: std::num::ParseIntError| StegoError::MalformedCoverData {
+                    reason: format!("invalid height: {e}"),
+                },
+            )?;
 
-        let pixel_count = width
-            .checked_mul(height)
-            .ok_or_else(|| StegoError::MalformedCoverData {
-                reason: "pixel count overflow".to_string(),
-            })?;
+        let pixel_count =
+            width
+                .checked_mul(height)
+                .ok_or_else(|| StegoError::MalformedCoverData {
+                    reason: "pixel count overflow".to_string(),
+                })?;
 
         // Capacity: 3 bits per pixel (R, G, B), minus 32 bits for header
         // = (pixel_count * 3 - 32) / 8 bytes
@@ -239,7 +262,7 @@ impl EmbedTechnique for LsbImage {
             _ => {
                 return Err(StegoError::UnsupportedCoverType {
                     reason: format!("LSB image requires PNG or BMP, got {:?}", cover.kind),
-                })
+                });
             }
         }
 
@@ -266,7 +289,10 @@ impl EmbedTechnique for LsbImage {
         let mut pixels = data;
 
         // Embed 32-bit big-endian payload length in first 32 LSBs
-        #[expect(clippy::cast_possible_truncation, reason = "checked above: payload_len <= u32::MAX")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "checked above: payload_len <= u32::MAX"
+        )]
         let len_bytes = (payload_len as u32).to_be_bytes();
         for (byte_idx, byte) in len_bytes.iter().enumerate() {
             for bit_idx in 0..8 {
@@ -278,7 +304,13 @@ impl EmbedTechnique for LsbImage {
                 let rgb_offset = pixel_idx % 3;
                 let byte_pos = channel_idx * 4 + rgb_offset;
 
-                pixels[byte_pos] = (pixels[byte_pos] & 0xFE) | bit;
+                let pixel =
+                    pixels
+                        .get_mut(byte_pos)
+                        .ok_or_else(|| StegoError::MalformedCoverData {
+                            reason: "pixel index out of bounds".to_string(),
+                        })?;
+                *pixel = (*pixel & 0xFE) | bit;
             }
         }
 
@@ -294,7 +326,13 @@ impl EmbedTechnique for LsbImage {
                 let rgb_offset = pixel_idx % 3;
                 let byte_pos = channel_idx * 4 + rgb_offset;
 
-                pixels[byte_pos] = (pixels[byte_pos] & 0xFE) | bit;
+                let pixel =
+                    pixels
+                        .get_mut(byte_pos)
+                        .ok_or_else(|| StegoError::MalformedCoverData {
+                            reason: "pixel index out of bounds".to_string(),
+                        })?;
+                *pixel = (*pixel & 0xFE) | bit;
             }
         }
 
@@ -315,7 +353,7 @@ impl ExtractTechnique for LsbImage {
             _ => {
                 return Err(StegoError::UnsupportedCoverType {
                     reason: format!("LSB image requires PNG or BMP, got {:?}", cover.kind),
-                })
+                });
             }
         }
 
@@ -332,7 +370,12 @@ impl ExtractTechnique for LsbImage {
                 let rgb_offset = pixel_idx % 3;
                 let byte_pos = channel_idx * 4 + rgb_offset;
 
-                let bit = pixels[byte_pos] & 1;
+                let bit = pixels
+                    .get(byte_pos)
+                    .ok_or_else(|| StegoError::MalformedCoverData {
+                        reason: "pixel index out of bounds".to_string(),
+                    })?
+                    & 1;
                 *len_byte |= bit << (7 - bit_idx);
             }
         }
@@ -350,7 +393,12 @@ impl ExtractTechnique for LsbImage {
                 let rgb_offset = pixel_idx % 3;
                 let byte_pos = channel_idx * 4 + rgb_offset;
 
-                let bit = pixels[byte_pos] & 1;
+                let bit = pixels
+                    .get(byte_pos)
+                    .ok_or_else(|| StegoError::MalformedCoverData {
+                        reason: "pixel index out of bounds".to_string(),
+                    })?
+                    & 1;
                 *payload_byte |= bit << (7 - bit_idx);
             }
         }
@@ -510,11 +558,12 @@ impl EmbedTechnique for LsbAudio {
         }
 
         // Capacity: (sample_count - 32) / 8 bytes
-        let capacity_bits = sample_count.checked_sub(32).ok_or_else(|| {
-            StegoError::MalformedCoverData {
-                reason: "capacity calculation underflow".to_string(),
-            }
-        })?;
+        let capacity_bits =
+            sample_count
+                .checked_sub(32)
+                .ok_or_else(|| StegoError::MalformedCoverData {
+                    reason: "capacity calculation underflow".to_string(),
+                })?;
 
         let bytes = (capacity_bits / 8) as u64;
 
@@ -554,7 +603,10 @@ impl EmbedTechnique for LsbAudio {
         let mut samples = cover.data.to_vec();
 
         // Embed 32-bit big-endian payload length in first 32 sample LSBs
-        #[expect(clippy::cast_possible_truncation, reason = "checked above: payload_len <= u32::MAX")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "checked above: payload_len <= u32::MAX"
+        )]
         let len_bytes = (payload_len as u32).to_be_bytes();
         for (byte_idx, byte) in len_bytes.iter().enumerate() {
             for bit_idx in 0..8 {
@@ -563,7 +615,13 @@ impl EmbedTechnique for LsbAudio {
 
                 // Modify LSB of i16 sample (little-endian)
                 let byte_pos = sample_idx * 2; // i16 = 2 bytes
-                samples[byte_pos] = (samples[byte_pos] & 0xFE) | bit;
+                let sample =
+                    samples
+                        .get_mut(byte_pos)
+                        .ok_or_else(|| StegoError::MalformedCoverData {
+                            reason: "sample index out of bounds".to_string(),
+                        })?;
+                *sample = (*sample & 0xFE) | bit;
             }
         }
 
@@ -575,7 +633,13 @@ impl EmbedTechnique for LsbAudio {
                 let sample_idx = 32 + byte_idx * 8 + bit_idx;
 
                 let byte_pos = sample_idx * 2;
-                samples[byte_pos] = (samples[byte_pos] & 0xFE) | bit;
+                let sample =
+                    samples
+                        .get_mut(byte_pos)
+                        .ok_or_else(|| StegoError::MalformedCoverData {
+                            reason: "sample index out of bounds".to_string(),
+                        })?;
+                *sample = (*sample & 0xFE) | bit;
             }
         }
 
@@ -614,7 +678,12 @@ impl ExtractTechnique for LsbAudio {
                 let sample_idx = byte_idx * 8 + bit_idx;
                 let byte_pos = sample_idx * 2;
 
-                let bit = samples[byte_pos] & 1;
+                let bit = samples
+                    .get(byte_pos)
+                    .ok_or_else(|| StegoError::MalformedCoverData {
+                        reason: "sample index out of bounds".to_string(),
+                    })?
+                    & 1;
                 *len_byte |= bit << (7 - bit_idx);
             }
         }
@@ -636,7 +705,12 @@ impl ExtractTechnique for LsbAudio {
                 let sample_idx = 32 + byte_idx * 8 + bit_idx;
                 let byte_pos = sample_idx * 2;
 
-                let bit = samples[byte_pos] & 1;
+                let bit = samples
+                    .get(byte_pos)
+                    .ok_or_else(|| StegoError::MalformedCoverData {
+                        reason: "sample index out of bounds".to_string(),
+                    })?
+                    & 1;
                 *payload_byte |= bit << (7 - bit_idx);
             }
         }
@@ -876,16 +950,22 @@ impl DualPayloadEmbedder {
         for (bit_idx, &pos) in positions.iter().enumerate().take(payload_bits) {
             let payload_byte_idx = bit_idx / 8;
             let payload_bit_idx = 7 - (bit_idx % 8); // MSB-first
-            let payload_bit = (payload[payload_byte_idx] >> payload_bit_idx) & 1;
+            let payload_byte = payload
+                .get(payload_byte_idx)
+                .ok_or(DeniableError::InsufficientCapacity)?;
+            let payload_bit = (payload_byte >> payload_bit_idx) & 1;
 
             let cover_byte_idx = pos / 8;
             let cover_bit_idx = pos % 8;
 
             // Set the LSB at this position
+            let byte = cover_data
+                .get_mut(cover_byte_idx)
+                .ok_or(DeniableError::InsufficientCapacity)?;
             if payload_bit == 1 {
-                cover_data[cover_byte_idx] |= 1 << cover_bit_idx;
+                *byte |= 1 << cover_bit_idx;
             } else {
-                cover_data[cover_byte_idx] &= !(1 << cover_bit_idx);
+                *byte &= !(1 << cover_bit_idx);
             }
         }
 
@@ -911,13 +991,24 @@ impl DualPayloadEmbedder {
         for (bit_idx, &pos) in positions.iter().enumerate().take(payload_bits) {
             let cover_byte_idx = pos / 8;
             let cover_bit_idx = pos % 8;
-            let cover_bit = (cover_data[cover_byte_idx] >> cover_bit_idx) & 1;
+            let cover_byte =
+                cover_data
+                    .get(cover_byte_idx)
+                    .ok_or_else(|| DeniableError::ExtractionFailed {
+                        reason: "cover byte index out of bounds".to_string(),
+                    })?;
+            let cover_bit = (cover_byte >> cover_bit_idx) & 1;
 
             let payload_byte_idx = bit_idx / 8;
             let payload_bit_idx = 7 - (bit_idx % 8); // MSB-first
 
             if cover_bit == 1 {
-                payload[payload_byte_idx] |= 1 << payload_bit_idx;
+                let byte = payload.get_mut(payload_byte_idx).ok_or_else(|| {
+                    DeniableError::ExtractionFailed {
+                        reason: "payload byte index out of bounds".to_string(),
+                    }
+                })?;
+                *byte |= 1 << payload_bit_idx;
             }
         }
 
@@ -958,26 +1049,34 @@ impl DeniableEmbedder for DualPayloadEmbedder {
 
         // Generate patterns within each channel
         // Channel 0: select from even-indexed bits
-        let primary_positions = Self::generate_pattern(primary_seed, channel_capacity, real_total_bits)
-            .into_iter()
-            .map(|i| i * 2) // Map to even indices
-            .collect::<Vec<_>>();
+        let primary_positions =
+            Self::generate_pattern(primary_seed, channel_capacity, real_total_bits)
+                .into_iter()
+                .map(|i| i * 2) // Map to even indices
+                .collect::<Vec<_>>();
 
         // Channel 1: select from odd-indexed bits
-        let decoy_positions = Self::generate_pattern(decoy_seed, channel_capacity, decoy_total_bits)
-            .into_iter()
-            .map(|i| i * 2 + 1) // Map to odd indices
-            .collect::<Vec<_>>();
+        let decoy_positions =
+            Self::generate_pattern(decoy_seed, channel_capacity, decoy_total_bits)
+                .into_iter()
+                .map(|i| i * 2 + 1) // Map to odd indices
+                .collect::<Vec<_>>();
 
         // Prepare payloads with length headers (32-bit big-endian)
         let real_len = pair.real_payload.len();
         let decoy_len = pair.decoy_payload.len();
 
-        #[expect(clippy::cast_possible_truncation, reason = "payload size checked against u32::MAX in capacity validation")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "payload size checked against u32::MAX in capacity validation"
+        )]
         let mut real_with_header = (real_len as u32).to_be_bytes().to_vec();
         real_with_header.extend_from_slice(&pair.real_payload);
 
-        #[expect(clippy::cast_possible_truncation, reason = "payload size checked against u32::MAX in capacity validation")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "payload size checked against u32::MAX in capacity validation"
+        )]
         let mut decoy_with_header = (decoy_len as u32).to_be_bytes().to_vec();
         decoy_with_header.extend_from_slice(&pair.decoy_payload);
 
@@ -985,15 +1084,17 @@ impl DeniableEmbedder for DualPayloadEmbedder {
         let mut cover_data = cover.data.to_vec();
 
         // Embed both payloads (guaranteed non-overlapping due to channel separation)
-        Self::embed_at_positions(&mut cover_data, &real_with_header, &primary_positions)
-            .map_err(|e| DeniableError::EmbedFailed {
+        Self::embed_at_positions(&mut cover_data, &real_with_header, &primary_positions).map_err(
+            |e| DeniableError::EmbedFailed {
                 reason: format!("real payload embed failed: {e}"),
-            })?;
+            },
+        )?;
 
-        Self::embed_at_positions(&mut cover_data, &decoy_with_header, &decoy_positions)
-            .map_err(|e| DeniableError::EmbedFailed {
+        Self::embed_at_positions(&mut cover_data, &decoy_with_header, &decoy_positions).map_err(
+            |e| DeniableError::EmbedFailed {
                 reason: format!("decoy payload embed failed: {e}"),
-            })?;
+            },
+        )?;
 
         cover.data = cover_data.into();
         Ok(cover)
@@ -1013,7 +1114,6 @@ impl DeniableEmbedder for DualPayloadEmbedder {
         // Channel 0: even bits
         // Channel 1: odd bits
 
-
         for channel in 0..2 {
             let seed = Self::derive_seed_with_channel(key, channel);
 
@@ -1024,28 +1124,21 @@ impl DeniableEmbedder for DualPayloadEmbedder {
                 .map(|i| i * 2 + channel as usize) // Map to channel's bit indices
                 .collect::<Vec<_>>();
 
-
             if header_positions.len() < header_bits {
                 continue; // Try next channel
             }
 
             // Extract length header
-            let Ok(header_bytes) = Self::extract_from_positions(
-                stego.data.as_ref(),
-                &header_positions,
-                4,
-            ) else {
+            let Ok(header_bytes) =
+                Self::extract_from_positions(stego.data.as_ref(), &header_positions, 4)
+            else {
                 continue; // Try next channel
             };
 
-
-            let payload_len = u32::from_be_bytes([
-                header_bytes[0],
-                header_bytes[1],
-                header_bytes[2],
-                header_bytes[3],
-            ]) as usize;
-
+            let Ok(header_arr) = <[u8; 4]>::try_from(header_bytes.as_slice()) else {
+                continue;
+            };
+            let payload_len = u32::from_be_bytes(header_arr) as usize;
 
             // Validate payload length is reasonable
             // Reject 0-length payloads (likely garbage from wrong channel)
@@ -1070,25 +1163,23 @@ impl DeniableEmbedder for DualPayloadEmbedder {
                 .collect::<Vec<_>>();
 
             // Extract full payload
-            let Ok(with_header) = Self::extract_from_positions(
-                stego.data.as_ref(),
-                &positions,
-                payload_len + 4,
-            ) else {
+            let Ok(with_header) =
+                Self::extract_from_positions(stego.data.as_ref(), &positions, payload_len + 4)
+            else {
                 continue; // Try next channel
             };
 
             // Verify header matches
-            let extracted_header = u32::from_be_bytes([
-                with_header[0],
-                with_header[1],
-                with_header[2],
-                with_header[3],
-            ]) as usize;
+            let Ok(extracted_arr) = <[u8; 4]>::try_from(with_header.get(..4).unwrap_or_default())
+            else {
+                continue;
+            };
+            let extracted_header = u32::from_be_bytes(extracted_arr) as usize;
 
             if extracted_header == payload_len {
                 // Success! Return payload without header
-                return Ok(Payload::from_bytes(with_header[4..].to_vec()));
+                let payload_data = with_header.get(4..).unwrap_or_default();
+                return Ok(Payload::from_bytes(payload_data.to_vec()));
             }
         }
 
@@ -1110,19 +1201,21 @@ impl DeniableEmbedder for DualPayloadEmbedder {
 mod tests {
     use super::*;
     use crate::adapters::pdf::PdfProcessorImpl;
-    use lopdf::{dictionary, Document, Object};
+    use lopdf::{Document, Object, dictionary};
 
-    fn create_test_pdf() -> Vec<u8> {
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    fn create_test_pdf() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut doc = Document::with_version("1.7");
-        let pages_id = doc.new_object_id();
-        let page_id = doc.new_object_id();
+        let catalog_pages = doc.new_object_id();
+        let first_page = doc.new_object_id();
 
         doc.objects.insert(
-            page_id,
+            first_page,
             Object::Dictionary(dictionary! {
                 "Type" => "Page",
                 "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
-                "Contents" => Object::Reference((page_id.0 + 1, 0)),
+                "Contents" => Object::Reference((first_page.0 + 1, 0)),
             }),
         );
 
@@ -1132,32 +1225,32 @@ mod tests {
         doc.add_object(lopdf::Stream::new(dictionary! {}, content.to_vec()));
 
         doc.objects.insert(
-            pages_id,
+            catalog_pages,
             Object::Dictionary(dictionary! {
                 "Type" => "Pages",
-                "Kids" => vec![Object::Reference(page_id)],
+                "Kids" => vec![Object::Reference(first_page)],
                 "Count" => 1,
             }),
         );
 
         let catalog_id = doc.add_object(dictionary! {
             "Type" => "Catalog",
-            "Pages" => Object::Reference(pages_id),
+            "Pages" => Object::Reference(catalog_pages),
         });
 
         doc.trailer.set("Root", Object::Reference(catalog_id));
 
         let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).expect("save test PDF");
-        bytes
+        doc.save_to(&mut bytes)?;
+        Ok(bytes)
     }
 
     #[test]
-    fn test_pdf_content_stream_lsb_roundtrip() {
+    fn test_pdf_content_stream_lsb_roundtrip() -> TestResult {
         let processor = Box::new(PdfProcessorImpl::default());
         let embedder = PdfContentStreamLsb::new(processor);
 
-        let pdf_bytes = create_test_pdf();
+        let pdf_bytes = create_test_pdf()?;
         let cover = CoverMedia {
             kind: CoverMediaKind::PdfDocument,
             data: pdf_bytes.into(),
@@ -1167,19 +1260,20 @@ mod tests {
         let payload = Payload::from_bytes(vec![0xAB]); // 1 byte
 
         // Embed
-        let stego = embedder.embed(cover, &payload).expect("embed");
+        let stego = embedder.embed(cover, &payload)?;
 
         // Extract
-        let extracted = embedder.extract(&stego).expect("extract");
+        let extracted = embedder.extract(&stego)?;
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
-    fn test_pdf_metadata_embed_roundtrip() {
+    fn test_pdf_metadata_embed_roundtrip() -> TestResult {
         let processor = Box::new(PdfProcessorImpl::default());
         let embedder = PdfMetadataEmbed::new(processor);
 
-        let pdf_bytes = create_test_pdf();
+        let pdf_bytes = create_test_pdf()?;
         let cover = CoverMedia {
             kind: CoverMediaKind::PdfDocument,
             data: pdf_bytes.into(),
@@ -1189,11 +1283,12 @@ mod tests {
         let payload = Payload::from_bytes(vec![1, 2, 3, 4, 5]); // 5 bytes
 
         // Embed
-        let stego = embedder.embed(cover, &payload).expect("embed");
+        let stego = embedder.embed(cover, &payload)?;
 
         // Extract
-        let extracted = embedder.extract(&stego).expect("extract");
+        let extracted = embedder.extract(&stego)?;
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
@@ -1210,11 +1305,14 @@ mod tests {
         let payload = Payload::from_bytes(vec![1, 2, 3]);
 
         let result = embedder.embed(cover, &payload);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
     }
 
     #[test]
-    fn test_lsb_image_roundtrip_256x256() {
+    fn test_lsb_image_roundtrip_256x256() -> TestResult {
         let embedder = LsbImage::new();
 
         // Create 256x256 white RGBA image
@@ -1237,7 +1335,7 @@ mod tests {
         let payload = Payload::from_bytes(vec![0xAB; 64]);
 
         // Embed
-        let stego = embedder.embed(cover.clone(), &payload).expect("embed");
+        let stego = embedder.embed(cover.clone(), &payload)?;
 
         // Verify pixel changes are ±1
         let orig_pixels = cover.data.as_ref();
@@ -1251,12 +1349,13 @@ mod tests {
         }
 
         // Extract
-        let extracted = embedder.extract(&stego).expect("extract");
+        let extracted = embedder.extract(&stego)?;
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
-    fn test_lsb_image_capacity_10x10() {
+    fn test_lsb_image_capacity_10x10() -> TestResult {
         let embedder = LsbImage::new();
 
         let width = 10_u32;
@@ -1274,7 +1373,7 @@ mod tests {
             metadata,
         };
 
-        let cap = embedder.capacity(&cover).expect("capacity");
+        let cap = embedder.capacity(&cover)?;
 
         // 10x10 = 100 pixels
         // 100 * 3 = 300 bits
@@ -1282,6 +1381,7 @@ mod tests {
         // 268 / 8 = 33 bytes
         assert_eq!(cap.bytes, 33);
         assert_eq!(cap.technique, StegoTechnique::LsbImage);
+        Ok(())
     }
 
     #[test]
@@ -1307,14 +1407,11 @@ mod tests {
         let payload = Payload::from_bytes(vec![0xAB; 100]);
 
         let result = embedder.embed(cover, &payload);
-        assert!(matches!(
-            result,
-            Err(StegoError::PayloadTooLarge { .. })
-        ));
+        assert!(matches!(result, Err(StegoError::PayloadTooLarge { .. })));
     }
 
     #[test]
-    fn test_lsb_image_bmp_support() {
+    fn test_lsb_image_bmp_support() -> TestResult {
         let embedder = LsbImage::new();
 
         let width = 100_u32;
@@ -1335,11 +1432,12 @@ mod tests {
         let payload = Payload::from_bytes(vec![1, 2, 3, 4, 5]);
 
         // Embed
-        let stego = embedder.embed(cover, &payload).expect("embed");
+        let stego = embedder.embed(cover, &payload)?;
 
         // Extract
-        let extracted = embedder.extract(&stego).expect("extract");
+        let extracted = embedder.extract(&stego)?;
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
@@ -1356,13 +1454,22 @@ mod tests {
 
         // Should return UnsupportedCoverType error indicating not implemented
         let result = embedder.embed(cover.clone(), &payload);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.extract(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.capacity(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
     }
 
     #[test]
@@ -1379,17 +1486,26 @@ mod tests {
 
         // Should return UnsupportedCoverType error indicating not implemented
         let result = embedder.embed(cover.clone(), &payload);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.extract(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.capacity(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
     }
 
     #[test]
-    fn test_lsb_audio_roundtrip() {
+    fn test_lsb_audio_roundtrip() -> TestResult {
         let embedder = LsbAudio::new();
 
         // Create 1s of 44100 Hz 16-bit mono silence (44100 samples)
@@ -1415,15 +1531,16 @@ mod tests {
         let payload = Payload::from_bytes(vec![0xAB; 512]);
 
         // Embed
-        let stego = embedder.embed(cover, &payload).expect("embed");
+        let stego = embedder.embed(cover, &payload)?;
 
         // Extract
-        let extracted = embedder.extract(&stego).expect("extract");
+        let extracted = embedder.extract(&stego)?;
         assert_eq!(extracted.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
-    fn test_lsb_audio_capacity() {
+    fn test_lsb_audio_capacity() -> TestResult {
         let embedder = LsbAudio::new();
 
         // 1000 samples
@@ -1444,11 +1561,12 @@ mod tests {
             metadata,
         };
 
-        let cap = embedder.capacity(&cover).expect("capacity");
+        let cap = embedder.capacity(&cover)?;
 
         // 1000 samples - 32 (header) = 968 bits / 8 = 121 bytes
         assert_eq!(cap.bytes, 121);
         assert_eq!(cap.technique, StegoTechnique::LsbAudio);
+        Ok(())
     }
 
     #[test]
@@ -1498,13 +1616,22 @@ mod tests {
         let payload = Payload::from_bytes(vec![1, 2, 3]);
 
         let result = embedder.embed(cover.clone(), &payload);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.extract(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.capacity(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
     }
 
     #[test]
@@ -1525,13 +1652,22 @@ mod tests {
         let payload = Payload::from_bytes(vec![1, 2, 3]);
 
         let result = embedder.embed(cover.clone(), &payload);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.extract(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.capacity(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
     }
 
     #[test]
@@ -1540,24 +1676,33 @@ mod tests {
 
         let cover = CoverMedia {
             kind: CoverMediaKind::PlainText,
-            data: "Hello, world!".as_bytes().to_vec().into(),
+            data: b"Hello, world!".to_vec().into(),
             metadata: std::collections::HashMap::new(),
         };
 
         let payload = Payload::from_bytes(vec![1, 2, 3]);
 
         let result = embedder.embed(cover.clone(), &payload);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.extract(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
 
         let result = embedder.capacity(&cover);
-        assert!(matches!(result, Err(StegoError::UnsupportedCoverType { .. })));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
     }
 
     #[test]
-    fn test_dual_payload_roundtrip() {
+    fn test_dual_payload_roundtrip() -> TestResult {
         let embedder = DualPayloadEmbedder::new();
         let lsb_image = LsbImage::new();
 
@@ -1594,22 +1739,16 @@ mod tests {
         };
 
         // Embed dual payloads
-        let stego = embedder
-            .embed_dual(cover.clone(), &pair, &keys, &lsb_image)
-            .expect("embed_dual should succeed");
-
+        let stego = embedder.embed_dual(cover, &pair, &keys, &lsb_image)?;
 
         // Extract with primary key
-        let extracted_real = embedder
-            .extract_with_key(&stego, &keys.primary_key, &lsb_image)
-            .expect("extract with primary key should succeed");
+        let extracted_real = embedder.extract_with_key(&stego, &keys.primary_key, &lsb_image)?;
         assert_eq!(extracted_real.as_bytes(), &real_payload);
 
         // Extract with decoy key
-        let extracted_decoy = embedder
-            .extract_with_key(&stego, &keys.decoy_key, &lsb_image)
-            .expect("extract with decoy key should succeed");
+        let extracted_decoy = embedder.extract_with_key(&stego, &keys.decoy_key, &lsb_image)?;
         assert_eq!(extracted_decoy.as_bytes(), &decoy_payload);
+        Ok(())
     }
 
     #[test]
@@ -1654,7 +1793,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dual_payload_different_keys_produce_different_results() {
+    fn test_dual_payload_different_keys_produce_different_results() -> TestResult {
         let embedder = DualPayloadEmbedder::new();
         let lsb_image = LsbImage::new();
 
@@ -1688,28 +1827,23 @@ mod tests {
             decoy_key: b"key2".to_vec(),
         };
 
-        let stego = embedder
-            .embed_dual(cover, &pair, &keys, &lsb_image)
-            .expect("embed should succeed");
+        let stego = embedder.embed_dual(cover, &pair, &keys, &lsb_image)?;
 
         // Extract with primary key
-        let extracted1 = embedder
-            .extract_with_key(&stego, &keys.primary_key, &lsb_image)
-            .expect("extract with primary should succeed");
+        let extracted1 = embedder.extract_with_key(&stego, &keys.primary_key, &lsb_image)?;
 
         // Extract with decoy key
-        let extracted2 = embedder
-            .extract_with_key(&stego, &keys.decoy_key, &lsb_image)
-            .expect("extract with decoy should succeed");
+        let extracted2 = embedder.extract_with_key(&stego, &keys.decoy_key, &lsb_image)?;
 
         // Should be different
         assert_ne!(extracted1.as_bytes(), extracted2.as_bytes());
         assert_eq!(extracted1.as_bytes(), &real_payload);
         assert_eq!(extracted2.as_bytes(), &decoy_payload);
+        Ok(())
     }
 
     #[test]
-    fn test_dual_payload_wrong_key_produces_garbage() {
+    fn test_dual_payload_wrong_key_produces_garbage() -> TestResult {
         let embedder = DualPayloadEmbedder::new();
         let lsb_image = LsbImage::new();
 
@@ -1743,9 +1877,7 @@ mod tests {
             decoy_key: b"correct_decoy".to_vec(),
         };
 
-        let stego = embedder
-            .embed_dual(cover, &pair, &keys, &lsb_image)
-            .expect("embed should succeed");
+        let stego = embedder.embed_dual(cover, &pair, &keys, &lsb_image)?;
 
         // Try extracting with a wrong key
         let wrong_key = b"wrong_key";
@@ -1762,7 +1894,8 @@ mod tests {
             Err(DeniableError::ExtractionFailed { .. }) => {
                 // This is also acceptable - garbage header caused extraction to fail
             }
-            Err(e) => panic!("unexpected error: {}", e),
+            Err(e) => return Err(e.into()),
         }
+        Ok(())
     }
 }

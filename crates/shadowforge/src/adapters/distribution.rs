@@ -116,7 +116,13 @@ fn distribute_one_to_many(
     let mut result = covers;
 
     for (shard_idx, cover_idx) in assignments {
-        let shard_payload = Payload::from_bytes(shards[shard_idx].data.clone());
+        let shard = shards
+            .get(shard_idx)
+            .ok_or_else(|| DistributionError::InsufficientCovers {
+                needed: shard_idx.strict_add(1),
+                got: shards.len(),
+            })?;
+        let shard_payload = Payload::from_bytes(shard.data.clone());
         let cover = result.remove(cover_idx);
         let stego = embedder.embed(cover, &shard_payload).map_err(|source| {
             DistributionError::EmbedFailed {
@@ -151,17 +157,18 @@ fn distribute_many_to_many(
     let mut result = covers;
 
     for (shard_idx, cover_indices) in assignments.iter().enumerate() {
-        if shard_idx >= chunks.len() {
+        let Some(chunk) = chunks.get(shard_idx) else {
             break;
-        }
+        };
         for &cover_idx in cover_indices {
             let cover = result.remove(cover_idx);
-            let stego = embedder
-                .embed(cover, &chunks[shard_idx])
-                .map_err(|source| DistributionError::EmbedFailed {
-                    index: cover_idx,
-                    source,
-                })?;
+            let stego =
+                embedder
+                    .embed(cover, chunk)
+                    .map_err(|source| DistributionError::EmbedFailed {
+                        index: cover_idx,
+                        source,
+                    })?;
             result.insert(cover_idx, stego);
         }
     }
@@ -176,6 +183,8 @@ mod tests {
     use crate::domain::errors::StegoError;
     use crate::domain::types::{Capacity, CoverMedia, CoverMediaKind, StegoTechnique};
     use bytes::Bytes;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     /// Mock embedder that appends payload bytes to cover data.
     struct MockEmbedder;
@@ -212,20 +221,23 @@ mod tests {
     }
 
     #[test]
-    fn one_to_one_round_trip() {
+    fn one_to_one_round_trip() -> TestResult {
         let distributor = DistributorImpl::new();
         let payload = Payload::from_bytes(b"secret message".to_vec());
         let covers = vec![make_cover(128)];
-        let result = distributor
-            .distribute(&payload, &EmbeddingProfile::Standard, covers, &MockEmbedder)
-            .expect("distribute should succeed");
+        let result =
+            distributor.distribute(&payload, &EmbeddingProfile::Standard, covers, &MockEmbedder)?;
         assert_eq!(result.len(), 1);
         // Cover data should be larger (128 + 14 bytes of payload)
-        assert_eq!(result[0].data.len(), 128 + 14);
+        assert_eq!(
+            result.first().ok_or("index out of bounds")?.data.len(),
+            128 + 14
+        );
+        Ok(())
     }
 
     #[test]
-    fn one_to_many_produces_correct_shard_count() {
+    fn one_to_many_produces_correct_shard_count() -> TestResult {
         let covers: Vec<CoverMedia> = (0..8).map(|_| make_cover(256)).collect();
         let payload = Payload::from_bytes(vec![0xAB; 64]);
 
@@ -234,31 +246,31 @@ mod tests {
             data_shards: 5,
             parity_shards: 3,
         };
-        validate_cover_count(&pattern, covers.len()).expect("should be valid");
+        validate_cover_count(&pattern, covers.len())?;
 
-        let result = distribute_one_to_many(&payload, covers, &MockEmbedder, 5, 3)
-            .expect("distribute should succeed");
+        let result = distribute_one_to_many(&payload, covers, &MockEmbedder, 5, 3)?;
         assert_eq!(result.len(), 8);
         // Each cover should have been modified (data extended)
         for cover in &result {
             assert!(cover.data.len() > 256);
         }
+        Ok(())
     }
 
     #[test]
-    fn many_to_one_embed_single_cover() {
+    fn many_to_one_embed_single_cover() -> TestResult {
         let distributor = DistributorImpl::new();
         let payload = Payload::from_bytes(b"combined payload".to_vec());
         let covers = vec![make_cover(512)];
-        let result = distributor
-            .distribute(&payload, &EmbeddingProfile::Standard, covers, &MockEmbedder)
-            .expect("distribute should succeed");
+        let result =
+            distributor.distribute(&payload, &EmbeddingProfile::Standard, covers, &MockEmbedder)?;
         assert_eq!(result.len(), 1);
-        assert!(result[0].data.len() > 512);
+        assert!(result.first().ok_or("empty result")?.data.len() > 512);
+        Ok(())
     }
 
     #[test]
-    fn many_to_many_replicate_mode() {
+    fn many_to_many_replicate_mode() -> TestResult {
         let covers = vec![make_cover(256), make_cover(256), make_cover(256)];
         let payload = Payload::from_bytes(vec![0xCC; 30]);
 
@@ -267,13 +279,13 @@ mod tests {
             covers,
             &MockEmbedder,
             crate::domain::types::ManyToManyMode::Replicate,
-        )
-        .expect("distribute should succeed");
+        )?;
         assert_eq!(result.len(), 3);
         // In replicate mode, each cover gets every chunk — all should be modified
         for cover in &result {
             assert!(cover.data.len() > 256);
         }
+        Ok(())
     }
 
     #[test]
@@ -287,29 +299,37 @@ mod tests {
     }
 
     #[test]
-    fn pack_unpack_multiple_payloads_for_many_to_one() {
+    fn pack_unpack_multiple_payloads_for_many_to_one() -> TestResult {
         let payloads = vec![
             Payload::from_bytes(b"payload_a".to_vec()),
             Payload::from_bytes(b"payload_b".to_vec()),
             Payload::from_bytes(b"payload_c".to_vec()),
         ];
         let packed = pack_many_payloads(&payloads);
-        let combined = Payload::from_bytes(packed.clone());
+        let combined = Payload::from_bytes(packed);
 
         // Embed combined into single cover
         let covers = vec![make_cover(1024)];
-        let result =
-            distribute_one_to_one(&combined, covers, &MockEmbedder).expect("embed should succeed");
+        let result = distribute_one_to_one(&combined, covers, &MockEmbedder)?;
         assert_eq!(result.len(), 1);
 
         // The stego'd data contains original cover + packed payloads
-        let stego_data = &result[0].data;
-        let embedded_portion = &stego_data[1024..];
-        let unpacked = crate::domain::distribution::unpack_many_payloads(embedded_portion)
-            .expect("unpack should succeed");
+        let stego_data = &result.first().ok_or("empty result")?.data;
+        let embedded_portion = stego_data.get(1024..).ok_or("slice out of bounds")?;
+        let unpacked = crate::domain::distribution::unpack_many_payloads(embedded_portion)?;
         assert_eq!(unpacked.len(), 3);
-        assert_eq!(unpacked[0].as_bytes(), b"payload_a");
-        assert_eq!(unpacked[1].as_bytes(), b"payload_b");
-        assert_eq!(unpacked[2].as_bytes(), b"payload_c");
+        assert_eq!(
+            unpacked.first().ok_or("index out of bounds")?.as_bytes(),
+            b"payload_a"
+        );
+        assert_eq!(
+            unpacked.get(1).ok_or("index out of bounds")?.as_bytes(),
+            b"payload_b"
+        );
+        assert_eq!(
+            unpacked.get(2).ok_or("index out of bounds")?.as_bytes(),
+            b"payload_c"
+        );
+        Ok(())
     }
 }
