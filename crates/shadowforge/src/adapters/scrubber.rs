@@ -57,7 +57,9 @@ mod tests {
     fn scrub_via_adapter() {
         let scrubber = StyloScrubberImpl::new();
         let input = "Don\u{2019}t worry\u{2014}it\u{2019}s fine!";
-        let result = scrubber.scrub(input, &profile()).expect("scrub should succeed");
+        let result = scrubber
+            .scrub(input, &profile())
+            .expect("scrub should succeed");
         assert!(result.contains("do not"));
         assert!(result.contains("it is"));
         assert!(!result.contains('\u{2014}'));
@@ -66,7 +68,9 @@ mod tests {
     #[test]
     fn scrub_empty_returns_empty() {
         let scrubber = StyloScrubberImpl::new();
-        let result = scrubber.scrub("", &profile()).expect("scrub should succeed");
+        let result = scrubber
+            .scrub("", &profile())
+            .expect("scrub should succeed");
         assert!(result.is_empty());
     }
 
