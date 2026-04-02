@@ -8,6 +8,8 @@
 [![Edition](https://img.shields.io/badge/Edition-2024-blue)](https://doc.rust-lang.org/edition-guide/rust-2024/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/Build-Passing-brightgreen)](https://github.com/greysquirr3l/shadowforge-rs/actions)
+[![Tests](https://img.shields.io/badge/Tests-380_passing-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/Coverage-85%25-brightgreen)]()
 [![Security](https://img.shields.io/badge/Status-Pre--Audit-yellow)](SECURITY.md)
 
 **shadowforge-rs** is a quantum-resistant steganography toolkit for
@@ -236,6 +238,26 @@ make completions # generate shell completions
 make book       # build mdbook site locally
 make doc        # build rustdoc API docs
 ```
+
+### Test Coverage
+
+380 tests across all adapter, domain, and application modules — **85% line
+coverage** (2039/2397 lines). Key module coverage:
+
+| Module | Coverage |
+|--------|----------|
+| `application/services` | 100% |
+| `domain/types` | 100% |
+| `domain/analysis` | 98.6% |
+| `domain/crypto` | 93.5% |
+| `domain/distribution` | 89.2% |
+| `adapters/opsec` | 88% |
+| `adapters/media` | 86.4% |
+| `adapters/archive` | 86% |
+| `adapters/stego` | 84.5% |
+
+Coverage is enforced via `cargo-tarpaulin` with an 85% overall threshold
+and a 90% threshold for `domain::crypto`.
 
 See the [contributing guide](https://greysquirr3l.github.io/shadowforge-rs/contributing/setup.html)
 for full development setup instructions.
