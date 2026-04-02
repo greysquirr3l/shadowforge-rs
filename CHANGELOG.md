@@ -50,6 +50,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   adapters/opsec (88%), adapters/distribution (82.4%)
 - Added `tarpaulin.toml` to exclude CLI dispatch layer from coverage metrics
 
+### Security
+
+- **Hardcoded HMAC key replaced** — `DistributorImpl` now generates a random
+  32-byte HMAC key per session (or accepts one via `--hmac-key`); key persisted
+  alongside the output archive for reconstruction
+- **cargo-deny config fixed** — `unmaintained` field updated for v2 schema,
+  deprecated `deny` key removed, missing transitive licenses added
+  (CC0-1.0, MIT-0, CDLA-Permissive-2.0, bzip2-1.0.6); supply chain checks
+  now run cleanly (advisories ok, bans ok, licenses ok, sources ok)
+- **Panic wipe no longer leaks file paths** — removed `eprintln!` calls that
+  printed key/config/temp-dir paths to stderr during emergency wipe
+- **Pre-release crypto deps pinned** — `ml-kem` and `ml-dsa` locked to exact
+  RC versions to prevent silent upgrades
+- **Archive entry reads bounded** — zip/tar/tar.gz unpacking capped at
+  256 MiB per entry via `Read::take()` to prevent zip-bomb DoS
+- **stdin read bounded** — amnesia-mode extract capped at 256 MiB
+- **Dead `bincode` dependency removed** — unused crate eliminated from the
+  dependency tree
+
 ---
 
 ## [0.1.0] — TBD
