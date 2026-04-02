@@ -167,7 +167,10 @@ pub fn average_sentence_length(text: &str) -> f64 {
     }
 
     let total_words: usize = sentence_words.iter().sum();
-    #[expect(clippy::cast_precision_loss, reason = "sentence counts never exceed 2^52")]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "sentence counts never exceed 2^52"
+    )]
     {
         total_words as f64 / sentence_words.len() as f64
     }

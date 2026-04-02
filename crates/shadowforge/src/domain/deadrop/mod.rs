@@ -53,7 +53,7 @@ mod tests {
         assert!(json.contains("abc123"));
         assert!(!manifest.stego_hash.is_empty());
         Ok(())
-}
+    }
 
     #[test]
     fn retrieval_manifest_hash_changes_with_content() {
@@ -96,11 +96,10 @@ mod tests {
         );
 
         let json = serde_json::to_string(&manifest)?;
-        let recovered: RetrievalManifest =
-            serde_json::from_str(&json)?;
+        let recovered: RetrievalManifest = serde_json::from_str(&json)?;
 
         assert_eq!(recovered.stego_hash, manifest.stego_hash);
         assert_eq!(recovered.retrieval_url, manifest.retrieval_url);
         Ok(())
-}
+    }
 }

@@ -136,7 +136,7 @@ mod tests {
         // Stego cover should be larger (payload appended by mock)
         assert!(stego.data.len() > 512);
         Ok(())
-}
+    }
 
     #[test]
     fn encode_for_instagram_succeeds() {

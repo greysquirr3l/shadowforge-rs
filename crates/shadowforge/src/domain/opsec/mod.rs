@@ -246,7 +246,10 @@ pub fn embed_watermark(
 
     for (bit_idx, &pos) in positions.iter().enumerate() {
         // bit_idx < MARKER_BITS = 32, so bit_idx/8 < 4 = MARKER_PATTERN.len()
-        #[expect(clippy::indexing_slicing, reason = "bit_idx < MARKER_BITS; pos validated by derive_positions")]
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "bit_idx < MARKER_BITS; pos validated by derive_positions"
+        )]
         let marker_byte = MARKER_PATTERN[bit_idx / 8];
         let bit = (marker_byte >> (7 - (bit_idx % 8))) & 1;
         if let Some(byte) = data.get_mut(pos) {
@@ -273,7 +276,10 @@ pub fn identify_watermark(cover: &CoverMedia, tags: &[WatermarkTripwireTag]) -> 
         let mut all_match = true;
         for (bit_idx, &pos) in positions.iter().enumerate() {
             // bit_idx < MARKER_BITS = 32, so bit_idx/8 < 4 = MARKER_PATTERN.len()
-            #[expect(clippy::indexing_slicing, reason = "bit_idx < MARKER_BITS; pos validated by derive_positions")]
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "bit_idx < MARKER_BITS; pos validated by derive_positions"
+            )]
             let marker_byte = MARKER_PATTERN[bit_idx / 8];
             let expected_bit = (marker_byte >> (7 - (bit_idx % 8))) & 1;
             let actual_bit = cover.data.get(pos).map_or(0xFF, |b| b & 1);
@@ -362,15 +368,14 @@ mod tests {
             &mut cover_reader,
             &mut output,
             &MockEmbedder,
-        )
-        ?;
+        )?;
 
         // Output should contain both cover and payload bytes (mock appends)
         assert!(output.len() > cover_data.len());
         assert!(output.starts_with(cover_data));
         assert!(output.ends_with(payload_data));
         Ok(())
-}
+    }
 
     #[test]
     fn amnesiac_embed_empty_payload() -> TestResult {
@@ -386,13 +391,12 @@ mod tests {
             &mut cover_reader,
             &mut output,
             &MockEmbedder,
-        )
-        ?;
+        )?;
 
         // With empty payload, output should match cover
         assert_eq!(output.as_slice(), cover_data);
         Ok(())
-}
+    }
 
     #[test]
     fn amnesiac_embed_fails_on_bad_technique() {
@@ -421,11 +425,10 @@ mod tests {
             let mut payload = Cursor::new(b"secret".to_vec());
             let mut output = Vec::new();
 
-            embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)
-                ?;
+            embed_in_memory(&mut payload, &mut cover, &mut output, &MockEmbedder)?;
         }
         Ok(())
-}
+    }
 
     // ─── Geographic Distribution Tests ────────────────────────────────────
 
@@ -457,7 +460,7 @@ mod tests {
         let manifest = sample_manifest();
         validate_manifest(&manifest)?;
         Ok(())
-}
+    }
 
     #[test]
     fn validate_manifest_fails_insufficient_jurisdictions() {
@@ -489,7 +492,7 @@ mod tests {
         let manifest = build_manifest(entries, 2)?;
         assert_eq!(manifest.shards.len(), 2);
         Ok(())
-}
+    }
 
     #[test]
     fn recovery_complexity_score_mentions_jurisdictions() {
@@ -549,7 +552,7 @@ mod tests {
         let result = identify_watermark(&cover, &tags);
         assert_eq!(result, Some(0));
         Ok(())
-}
+    }
 
     #[test]
     fn different_tags_produce_different_covers() -> TestResult {
@@ -570,7 +573,7 @@ mod tests {
         assert_ne!(cover_a.data, cover_c.data);
         assert_ne!(cover_b.data, cover_c.data);
         Ok(())
-}
+    }
 
     #[test]
     fn identify_picks_correct_tag() -> TestResult {
@@ -584,7 +587,7 @@ mod tests {
         let result = identify_watermark(&cover, &tags);
         assert_eq!(result, Some(1)); // tag_b is at index 1
         Ok(())
-}
+    }
 
     #[test]
     fn identify_returns_none_when_no_match() {

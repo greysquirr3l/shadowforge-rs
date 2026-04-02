@@ -211,7 +211,9 @@ fn random_biguint(rng: &mut impl rand::Rng, bits: u64) -> BigUint {
     rng.fill_bytes(&mut buf);
     // Mask high bits to get exactly `bits` random bits
     let excess_bits = (byte_count * 8) as u64 - bits;
-    if excess_bits > 0 && let Some(first) = buf.first_mut() {
+    if excess_bits > 0
+        && let Some(first) = buf.first_mut()
+    {
         *first &= 0xFF >> excess_bits;
     }
     BigUint::from_bytes_be(&buf)

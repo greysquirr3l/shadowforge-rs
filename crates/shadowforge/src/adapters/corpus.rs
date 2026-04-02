@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(count, 5);
         assert_eq!(index.len(), 5);
         Ok(())
-}
+    }
 
     #[test]
     fn build_index_skips_non_image_files() -> TestResult {
@@ -220,7 +220,7 @@ mod tests {
         let count = index.build_index(dir.path())?;
         assert_eq!(count, 1);
         Ok(())
-}
+    }
 
     #[test]
     fn search_returns_exact_match_first() -> TestResult {
@@ -245,9 +245,7 @@ mod tests {
         let payload = Payload::from_bytes(expected_pattern.to_vec());
         drop(target_entry);
 
-        let results = index
-            .search(&payload, StegoTechnique::LsbImage, 5)
-            ?;
+        let results = index.search(&payload, StegoTechnique::LsbImage, 5)?;
         assert!(!results.is_empty());
         // First result should be the exact match
         assert_eq!(
@@ -255,7 +253,7 @@ mod tests {
             target_hash
         );
         Ok(())
-}
+    }
 
     #[test]
     fn search_empty_index_returns_error() {
@@ -274,7 +272,7 @@ mod tests {
         let index = CorpusIndexImpl::new();
         assert!(index.add_to_index(&path).is_err());
         Ok(())
-}
+    }
 
     #[test]
     fn build_index_rejects_non_directory() -> TestResult {
@@ -283,7 +281,7 @@ mod tests {
         let result = index.build_index(file.path());
         assert!(result.is_err());
         Ok(())
-}
+    }
 
     #[test]
     fn default_impl() {
