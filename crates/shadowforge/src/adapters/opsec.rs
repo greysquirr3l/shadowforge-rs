@@ -1,8 +1,13 @@
 //! Operational security adapters implementing emergency wipe and amnesiac operations.
 
 use crate::domain::errors::OpsecError;
-use crate::domain::ports::{AmnesiaPipeline, EmbedTechnique, GeographicDistributor, PanicWiper};
-use crate::domain::types::{CoverMedia, GeographicManifest, PanicWipeConfig, Payload};
+use crate::domain::ports::{
+    AmnesiaPipeline, EmbedTechnique, ForensicWatermarker, GeographicDistributor, PanicWiper,
+};
+use crate::domain::types::{
+    CoverMedia, GeographicManifest, PanicWipeConfig, Payload, WatermarkReceipt,
+    WatermarkTripwireTag,
+};
 use rand::Rng;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -303,6 +308,54 @@ impl GeographicDistributor for GeographicDistributorImpl {
         }
 
         Ok(results)
+    }
+}
+
+/// Forensic watermark tripwire adapter.
+///
+/// Delegates to [`crate::domain::opsec::embed_watermark`] and
+/// [`crate::domain::opsec::identify_watermark`].
+pub struct ForensicWatermarkerImpl;
+
+impl ForensicWatermarkerImpl {
+    /// Create a new forensic watermarker adapter.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ForensicWatermarkerImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ForensicWatermarker for ForensicWatermarkerImpl {
+    fn embed_tripwire(
+        &self,
+        mut cover: CoverMedia,
+        tag: &WatermarkTripwireTag,
+    ) -> Result<CoverMedia, OpsecError> {
+        crate::domain::opsec::embed_watermark(&mut cover, tag)?;
+        Ok(cover)
+    }
+
+    fn identify_recipient(
+        &self,
+        stego: &CoverMedia,
+        tags: &[WatermarkTripwireTag],
+    ) -> Result<Option<WatermarkReceipt>, OpsecError> {
+        let result = crate::domain::opsec::identify_watermark(stego, tags);
+        Ok(result.map(|idx| {
+            let tag = &tags[idx];
+            WatermarkReceipt {
+                recipient: tag.recipient_id.to_string(),
+                algorithm: "lsb-tripwire-v1".into(),
+                shards: vec![],
+                created_at: chrono::Utc::now(),
+            }
+        }))
     }
 }
 
@@ -628,5 +681,49 @@ mod tests {
             .distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)
             .expect("default should work");
         assert_eq!(results.len(), 3);
+    }
+
+    // ─── ForensicWatermarker Tests ────────────────────────────────────────
+
+    #[test]
+    fn forensic_watermarker_embed_roundtrip() {
+        let wm = ForensicWatermarkerImpl::new();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: Bytes::from(vec![0u8; 1024]),
+            metadata: std::collections::HashMap::new(),
+        };
+        let tag = WatermarkTripwireTag {
+            recipient_id: uuid::Uuid::new_v4(),
+            embedding_seed: b"adapter-test-seed".to_vec(),
+        };
+
+        let stego = wm.embed_tripwire(cover, &tag).expect("embed");
+        let receipt = wm
+            .identify_recipient(&stego, &[tag.clone()])
+            .expect("identify");
+        assert!(receipt.is_some());
+        let receipt = receipt.expect("should have receipt");
+        assert_eq!(receipt.recipient, tag.recipient_id.to_string());
+        assert_eq!(receipt.algorithm, "lsb-tripwire-v1");
+    }
+
+    #[test]
+    fn forensic_watermarker_no_match() {
+        let wm = ForensicWatermarkerImpl::default();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: Bytes::from(vec![0u8; 1024]),
+            metadata: std::collections::HashMap::new(),
+        };
+        let unknown_tag = WatermarkTripwireTag {
+            recipient_id: uuid::Uuid::new_v4(),
+            embedding_seed: b"unknown".to_vec(),
+        };
+
+        let result = wm
+            .identify_recipient(&cover, &[unknown_tag])
+            .expect("should not error");
+        assert!(result.is_none());
     }
 }
