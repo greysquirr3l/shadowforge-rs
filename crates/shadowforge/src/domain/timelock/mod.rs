@@ -39,7 +39,7 @@ fn derive_key_and_nonce(solution: &BigUint) -> ([u8; 32], [u8; NONCE_LEN]) {
     nonce_input.extend_from_slice(&solution_bytes);
     let nonce_hash = Sha256::digest(&nonce_input);
     let mut nonce = [0u8; NONCE_LEN];
-    nonce.copy_from_slice(&nonce_hash[..NONCE_LEN]);
+    nonce.copy_from_slice(nonce_hash.get(..NONCE_LEN).unwrap_or(&[0u8; NONCE_LEN]));
 
     (key, nonce)
 }
@@ -92,10 +92,11 @@ pub fn create_puzzle(
     let (key, nonce) = derive_key_and_nonce(&solution);
 
     // Encrypt payload
-    let ciphertext = encrypt_aes_gcm(&key, &nonce, payload.as_bytes())
-        .map_err(|e| TimeLockError::ComputationFailed {
+    let ciphertext = encrypt_aes_gcm(&key, &nonce, payload.as_bytes()).map_err(|e| {
+        TimeLockError::ComputationFailed {
             reason: format!("encryption failed: {e}"),
-        })?;
+        }
+    })?;
 
     Ok(TimeLockPuzzle {
         ciphertext,
@@ -140,7 +141,10 @@ pub fn try_solve_puzzle(
 ) -> Result<Option<Payload>, TimeLockError> {
     // Estimate remaining time
     let now = Utc::now();
-    let elapsed_secs = (now - puzzle.created_at).num_seconds().max(0).cast_unsigned();
+    let elapsed_secs = (now - puzzle.created_at)
+        .num_seconds()
+        .max(0)
+        .cast_unsigned();
     let estimated_solvable_squarings = elapsed_secs.saturating_mul(squarings_per_sec);
 
     if estimated_solvable_squarings < puzzle.squarings_required {
@@ -198,14 +202,17 @@ fn is_probably_prime(n: &BigUint) -> bool {
 
 /// Generate a random `BigUint` with the given number of bits.
 fn random_biguint(rng: &mut impl rand::Rng, bits: u64) -> BigUint {
-    #[expect(clippy::cast_possible_truncation, reason = "bits <= 256, always fits usize")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "bits <= 256, always fits usize"
+    )]
     let byte_count = bits.div_ceil(8) as usize;
     let mut buf = vec![0u8; byte_count];
     rng.fill_bytes(&mut buf);
     // Mask high bits to get exactly `bits` random bits
     let excess_bits = (byte_count * 8) as u64 - bits;
-    if excess_bits > 0 && !buf.is_empty() {
-        buf[0] &= 0xFF >> excess_bits;
+    if excess_bits > 0 && let Some(first) = buf.first_mut() {
+        *first &= 0xFF >> excess_bits;
     }
     BigUint::from_bytes_be(&buf)
 }
@@ -220,84 +227,82 @@ pub const fn default_squarings_per_sec() -> u64 {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn roundtrip_lock_then_unlock() {
+    fn roundtrip_lock_then_unlock() -> TestResult {
         let payload = Payload::from_bytes(b"secret message".to_vec());
         let unlock_at = Utc::now();
 
-        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("create puzzle");
+        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)?;
 
         // With 0 squarings required, solving should be instant
-        let recovered = solve_puzzle(&puzzle).expect("solve puzzle");
+        let recovered = solve_puzzle(&puzzle)?;
         assert_eq!(recovered.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
-    fn roundtrip_with_small_delay() {
+    fn roundtrip_with_small_delay() -> TestResult {
         let payload = Payload::from_bytes(b"timed secret".to_vec());
         let unlock_at = Utc::now();
 
-        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("create puzzle");
+        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)?;
 
-        let recovered = solve_puzzle(&puzzle).expect("solve puzzle");
+        let recovered = solve_puzzle(&puzzle)?;
         assert_eq!(recovered.as_bytes(), payload.as_bytes());
+        Ok(())
     }
 
     #[test]
-    fn try_solve_returns_none_for_future_puzzle() {
+    fn try_solve_returns_none_for_future_puzzle() -> TestResult {
         let payload = Payload::from_bytes(b"future secret".to_vec());
         let unlock_at = Utc::now() + chrono::Duration::hours(1);
 
-        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("create puzzle");
+        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)?;
 
         // Should return None because the puzzle requires many squarings
-        let result = try_solve_puzzle(&puzzle, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("try_solve");
+        let result = try_solve_puzzle(&puzzle, DEFAULT_SQUARINGS_PER_SEC)?;
         assert!(result.is_none());
+        Ok(())
     }
 
     #[test]
-    fn puzzle_serialises_to_json() {
+    fn puzzle_serialises_to_json() -> TestResult {
         let payload = Payload::from_bytes(b"json test".to_vec());
         let unlock_at = Utc::now();
 
-        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("create puzzle");
+        let puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)?;
 
-        let json = serde_json::to_string_pretty(&puzzle).expect("serialise");
+        let json = serde_json::to_string_pretty(&puzzle)?;
         assert!(json.contains("squarings_required"));
         assert!(json.contains("modulus"));
 
-        let recovered: TimeLockPuzzle =
-            serde_json::from_str(&json).expect("deserialise");
+        let recovered: TimeLockPuzzle = serde_json::from_str(&json)?;
         assert_eq!(recovered.squarings_required, puzzle.squarings_required);
+        Ok(())
     }
 
     #[test]
-    fn different_payloads_produce_different_puzzles() {
+    fn different_payloads_produce_different_puzzles() -> TestResult {
         let p1 = Payload::from_bytes(b"payload one".to_vec());
         let p2 = Payload::from_bytes(b"payload two".to_vec());
         let unlock_at = Utc::now();
 
-        let puzzle1 = create_puzzle(&p1, unlock_at, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("create p1");
-        let puzzle2 = create_puzzle(&p2, unlock_at, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("create p2");
+        let puzzle1 = create_puzzle(&p1, unlock_at, DEFAULT_SQUARINGS_PER_SEC)?;
+        let puzzle2 = create_puzzle(&p2, unlock_at, DEFAULT_SQUARINGS_PER_SEC)?;
 
         // Different moduli (random primes)
         assert_ne!(puzzle1.modulus, puzzle2.modulus);
+        Ok(())
     }
 
     #[test]
-    fn wrong_solution_fails_decrypt() {
+    fn wrong_solution_fails_decrypt() -> TestResult {
         let payload = Payload::from_bytes(b"fail test".to_vec());
         let unlock_at = Utc::now();
 
-        let mut puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)
-            .expect("create puzzle");
+        let mut puzzle = create_puzzle(&payload, unlock_at, DEFAULT_SQUARINGS_PER_SEC)?;
 
         // Corrupt the start value so squaring produces wrong result
         if let Some(byte) = puzzle.start_value.first_mut() {
@@ -306,6 +311,7 @@ mod tests {
 
         let result = solve_puzzle(&puzzle);
         assert!(result.is_err());
+        Ok(())
     }
 
     #[test]

@@ -9,13 +9,13 @@ use crate::domain::types::ArchiveFormat;
 /// Returns `None` if the format is unrecognised.
 #[must_use]
 pub fn detect_format(data: &[u8]) -> Option<ArchiveFormat> {
-    if data.len() >= 4 && data[0] == 0x50 && data[1] == 0x4B {
+    if data.first() == Some(&0x50) && data.get(1) == Some(&0x4B) {
         // PK (ZIP magic)
         Some(ArchiveFormat::Zip)
-    } else if data.len() >= 2 && data[0] == 0x1F && data[1] == 0x8B {
+    } else if data.first() == Some(&0x1F) && data.get(1) == Some(&0x8B) {
         // Gzip magic → TAR.GZ
         Some(ArchiveFormat::TarGz)
-    } else if data.len() >= 263 && &data[257..262] == b"ustar" {
+    } else if data.len() >= 263 && data.get(257..262) == Some(b"ustar") {
         // POSIX TAR magic at offset 257
         Some(ArchiveFormat::Tar)
     } else {
@@ -30,6 +30,8 @@ pub const MAX_NESTING_DEPTH: u8 = 3;
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
     fn detect_zip_by_magic() {
         let data = [0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0];
@@ -43,10 +45,13 @@ mod tests {
     }
 
     #[test]
-    fn detect_tar_by_ustar() {
+    fn detect_tar_by_ustar() -> TestResult {
         let mut data = vec![0u8; 300];
-        data[257..262].copy_from_slice(b"ustar");
+        data.get_mut(257..262)
+            .ok_or("slice out of bounds")?
+            .copy_from_slice(b"ustar");
         assert_eq!(detect_format(&data), Some(ArchiveFormat::Tar));
+        Ok(())
     }
 
     #[test]

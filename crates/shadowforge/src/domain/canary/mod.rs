@@ -28,6 +28,8 @@ pub fn generate_canary_shard(
     while data.len() < shard_size {
         let remaining = shard_size.saturating_sub(data.len());
         let chunk = remaining.min(marker.len());
+        // SAFETY: chunk <= marker.len() by `.min()` above
+        #[expect(clippy::indexing_slicing, reason = "chunk bounded by marker.len()")]
         data.extend_from_slice(&marker[..chunk]);
     }
 
@@ -70,7 +72,10 @@ pub fn is_canary_shard(shard: &Shard, canary_id: Uuid) -> bool {
         return false;
     }
     // Compare the first 32 bytes of shard data against the marker
-    shard.data[..marker.len()].ct_eq(&marker).into()
+    shard
+        .data
+        .get(..marker.len())
+        .is_some_and(|prefix| prefix.ct_eq(&marker).into())
 }
 
 #[cfg(test)]

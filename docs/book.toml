@@ -1,0 +1,16 @@
+[book]
+title = "shadowforge-rs"
+authors = ["greysquirr3l"]
+description = "Quantum-resistant steganography toolkit for journalists, whistleblowers, and dissidents"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/greysquirr3l/shadowforge-rs"
+edit-url-template = "https://github.com/greysquirr3l/shadowforge-rs/edit/main/docs/{path}"
+site-url = "/shadowforge-rs/"

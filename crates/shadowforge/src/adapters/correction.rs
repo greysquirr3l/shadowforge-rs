@@ -76,53 +76,57 @@ impl ErrorCorrector for RsErrorCorrector {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn test_rs_error_corrector_roundtrip() {
+    fn test_rs_error_corrector_roundtrip() -> TestResult {
         let hmac_key = b"test_key_32_bytes_long_padding!!".to_vec();
         let corrector = RsErrorCorrector::new(hmac_key);
 
         let data = b"The quick brown fox jumps over the lazy dog";
-        let shards = corrector.encode(data, 10, 5).expect("encode");
+        let shards = corrector.encode(data, 10, 5)?;
 
         let opt_shards: Vec<Option<Shard>> = shards.into_iter().map(Some).collect();
-        let recovered = corrector.decode(&opt_shards, 10, 5).expect("decode");
+        let recovered = corrector.decode(&opt_shards, 10, 5)?;
 
         // Recovered data may be padded, so check prefix
         assert!(recovered.starts_with(data));
-    }
+        Ok(())
+}
 
     #[test]
-    fn test_rs_error_corrector_with_missing_shards() {
+    fn test_rs_error_corrector_with_missing_shards() -> TestResult {
         let hmac_key = b"test_key_32_bytes_long_padding!!".to_vec();
         let corrector = RsErrorCorrector::new(hmac_key);
 
         let data = b"The quick brown fox jumps over the lazy dog";
-        let shards = corrector.encode(data, 10, 5).expect("encode");
+        let shards = corrector.encode(data, 10, 5)?;
 
         // Drop 5 shards
         let mut opt_shards: Vec<Option<Shard>> = shards.into_iter().map(Some).collect();
-        opt_shards[0] = None;
-        opt_shards[3] = None;
-        opt_shards[7] = None;
-        opt_shards[10] = None;
-        opt_shards[13] = None;
+        *opt_shards.get_mut(0).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(3).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(7).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(10).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(13).ok_or("out of bounds")? = None;
 
-        let recovered = corrector.decode(&opt_shards, 10, 5).expect("decode");
+        let recovered = corrector.decode(&opt_shards, 10, 5)?;
         assert!(recovered.starts_with(data));
-    }
+        Ok(())
+}
 
     #[test]
-    fn test_rs_error_corrector_insufficient_shards() {
+    fn test_rs_error_corrector_insufficient_shards() -> TestResult {
         let hmac_key = b"test_key_32_bytes_long_padding!!".to_vec();
         let corrector = RsErrorCorrector::new(hmac_key);
 
         let data = b"test data";
-        let shards = corrector.encode(data, 10, 5).expect("encode");
+        let shards = corrector.encode(data, 10, 5)?;
 
         // Drop 6 shards (too many)
         let mut opt_shards: Vec<Option<Shard>> = shards.into_iter().map(Some).collect();
         for i in 0..6 {
-            opt_shards[i] = None;
+            *opt_shards.get_mut(i).ok_or("out of bounds")? = None;
         }
 
         let result = corrector.decode(&opt_shards, 10, 5);
@@ -130,5 +134,6 @@ mod tests {
             result,
             Err(CorrectionError::InsufficientShards { .. })
         ));
-    }
+        Ok(())
+}
 }

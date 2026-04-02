@@ -487,9 +487,13 @@ pub struct PanicArgs {
 /// Arguments for `completions`.
 #[derive(Parser, Debug)]
 pub struct CompletionsArgs {
-    /// Shell to generate completions for.
-    #[arg(long, value_enum)]
+    /// Shell to generate completions for (bash, zsh, fish, elvish, powershell).
+    #[arg(value_enum)]
     pub shell: Shell,
+
+    /// Write completions to a file instead of stdout.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -592,7 +596,7 @@ mod tests {
 
     #[test]
     fn cli_parse_completions() {
-        let cli = Cli::try_parse_from(["shadowforge", "completions", "--shell", "bash"]);
+        let cli = Cli::try_parse_from(["shadowforge", "completions", "bash"]);
         assert!(cli.is_ok());
     }
 

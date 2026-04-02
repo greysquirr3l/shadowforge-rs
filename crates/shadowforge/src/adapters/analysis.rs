@@ -61,6 +61,8 @@ mod tests {
     use bytes::Bytes;
     use std::collections::HashMap;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     fn make_cover(kind: CoverMediaKind, data: Vec<u8>) -> CoverMedia {
         CoverMedia {
             kind,
@@ -70,19 +72,20 @@ mod tests {
     }
 
     #[test]
-    fn analyse_png_lsb_low_risk_for_uniform() {
+    fn analyse_png_lsb_low_risk_for_uniform() -> TestResult {
         let analyser = CapacityAnalyserImpl::new();
         // Uniform-ish data for low chi-square
         let data: Vec<u8> = (0..=255).cycle().take(256 * 40).collect();
         let cover = make_cover(CoverMediaKind::PngImage, data);
         let report = analyser
             .analyse(&cover, StegoTechnique::LsbImage)
-            .expect("should succeed");
+            ?;
 
         assert!(report.cover_capacity.bytes > 0);
         assert_eq!(report.detectability_risk, DetectabilityRisk::Low);
         assert!(report.recommended_max_payload_bytes > 0);
-    }
+        Ok(())
+}
 
     #[test]
     fn analyse_returns_error_for_incompatible_type() {
@@ -93,37 +96,40 @@ mod tests {
     }
 
     #[test]
-    fn analyse_pdf_content_stream() {
+    fn analyse_pdf_content_stream() -> TestResult {
         let analyser = CapacityAnalyserImpl::new();
         let cover = make_cover(CoverMediaKind::PdfDocument, vec![0u8; 50_000]);
         let report = analyser
             .analyse(&cover, StegoTechnique::PdfContentStream)
-            .expect("should succeed");
+            ?;
         assert!(report.cover_capacity.bytes > 0);
-    }
+        Ok(())
+}
 
     #[test]
-    fn analyse_corpus_selection_low_risk() {
+    fn analyse_corpus_selection_low_risk() -> TestResult {
         let analyser = CapacityAnalyserImpl::new();
         let data: Vec<u8> = (0..=255).cycle().take(256 * 32).collect();
         let cover = make_cover(CoverMediaKind::PngImage, data);
         let report = analyser
             .analyse(&cover, StegoTechnique::CorpusSelection)
-            .expect("should succeed");
+            ?;
         // Corpus selection should always be low risk if the cover data is uniform
         assert_eq!(report.detectability_risk, DetectabilityRisk::Low);
-    }
+        Ok(())
+}
 
     #[test]
-    fn report_serialises_to_json() {
+    fn report_serialises_to_json() -> TestResult {
         let analyser = CapacityAnalyserImpl::new();
         let data: Vec<u8> = (0..=255).cycle().take(8192).collect();
         let cover = make_cover(CoverMediaKind::PngImage, data);
         let report = analyser
             .analyse(&cover, StegoTechnique::LsbImage)
-            .expect("should succeed");
-        let json = serde_json::to_string(&report).expect("should serialize");
+            ?;
+        let json = serde_json::to_string(&report)?;
         assert!(json.contains("\"technique\""));
         assert!(json.contains("\"chi_square_score\""));
-    }
+        Ok(())
+}
 }

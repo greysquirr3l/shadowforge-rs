@@ -15,23 +15,30 @@ type HmacSha256 = Hmac<Sha256>;
 /// Compute HMAC-SHA-256 tag for a shard.
 ///
 /// Tag covers: `index || total || data`
-fn compute_hmac_tag(hmac_key: &[u8], index: u8, total: u8, data: &[u8]) -> [u8; 32] {
-    let mut mac = HmacSha256::new_from_slice(hmac_key)
-        .expect("HMAC-SHA-256 accepts any key length");
+fn compute_hmac_tag(
+    hmac_key: &[u8],
+    index: u8,
+    total: u8,
+    data: &[u8],
+) -> Result<[u8; 32], CorrectionError> {
+    let mut mac =
+        HmacSha256::new_from_slice(hmac_key).map_err(|_| CorrectionError::InvalidParameters {
+            reason: "invalid HMAC key length".into(),
+        })?;
     mac.update(&[index]);
     mac.update(&[total]);
     mac.update(data);
-    mac.finalize().into_bytes().into()
+    Ok(mac.finalize().into_bytes().into())
 }
 
 /// Verify HMAC tag for a shard.
 ///
 /// Returns `true` if the tag is valid.
-fn verify_hmac_tag(hmac_key: &[u8], shard: &Shard) -> bool {
+fn verify_hmac_tag(hmac_key: &[u8], shard: &Shard) -> Result<bool, CorrectionError> {
     use subtle::ConstantTimeEq;
 
-    let expected = compute_hmac_tag(hmac_key, shard.index, shard.total, &shard.data);
-    expected.ct_eq(&shard.hmac_tag).into()
+    let expected = compute_hmac_tag(hmac_key, shard.index, shard.total, &shard.data)?;
+    Ok(expected.ct_eq(&shard.hmac_tag).into())
 }
 
 /// Encode data into Reed-Solomon shards with HMAC tags.
@@ -57,25 +64,31 @@ pub fn encode_shards(
     }
 
     let total_shards = data_shards.strict_add(parity_shards);
-    let shard_size = (data.len().strict_add(usize::from(data_shards).strict_sub(1)))
+    let shard_size = (data
+        .len()
+        .strict_add(usize::from(data_shards).strict_sub(1)))
         / usize::from(data_shards);
 
     // Pad data to fit evenly into data_shards
     let total_size = shard_size.strict_mul(usize::from(data_shards));
     let mut padded = vec![0u8; total_size];
-    padded[..data.len()].copy_from_slice(data);
+    padded
+        .get_mut(..data.len())
+        .ok_or_else(|| CorrectionError::InvalidParameters {
+            reason: "data length exceeds padded buffer".into(),
+        })?
+        .copy_from_slice(data);
 
     // Create Reed-Solomon encoder
-    let rs = ReedSolomon::new(usize::from(data_shards), usize::from(parity_shards))
-        .map_err(|e| CorrectionError::ReedSolomonError {
-            reason: e.to_string(),
+    let rs =
+        ReedSolomon::new(usize::from(data_shards), usize::from(parity_shards)).map_err(|e| {
+            CorrectionError::ReedSolomonError {
+                reason: e.to_string(),
+            }
         })?;
 
     // Split into chunks
-    let mut chunks: Vec<Vec<u8>> = padded
-        .chunks(shard_size)
-        .map(<[u8]>::to_vec)
-        .collect();
+    let mut chunks: Vec<Vec<u8>> = padded.chunks(shard_size).map(<[u8]>::to_vec).collect();
 
     // Add parity shards
     chunks.resize(usize::from(total_shards), vec![0u8; shard_size]);
@@ -93,15 +106,15 @@ pub fn encode_shards(
         .map(|(i, data)| {
             #[expect(clippy::cast_possible_truncation, reason = "total_shards is u8")]
             let index = i as u8;
-            let hmac_tag = compute_hmac_tag(hmac_key, index, total_shards, &data);
-            Shard {
+            let hmac_tag = compute_hmac_tag(hmac_key, index, total_shards, &data)?;
+            Ok(Shard {
                 index,
                 total: total_shards,
                 data,
                 hmac_tag,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<Shard>, CorrectionError>>()?;
 
     Ok(shards)
 }
@@ -126,20 +139,14 @@ pub fn decode_shards(
 
     if shards.len() != usize::from(total_shards) {
         return Err(CorrectionError::InvalidParameters {
-            reason: format!(
-                "expected {} shards, got {}",
-                total_shards,
-                shards.len()
-            ),
+            reason: format!("expected {} shards, got {}", total_shards, shards.len()),
         });
     }
 
     // Verify HMAC tags for all present shards
     for shard in shards.iter().flatten() {
-        if !verify_hmac_tag(hmac_key, shard) {
-            return Err(CorrectionError::HmacMismatch {
-                index: shard.index,
-            });
+        if !verify_hmac_tag(hmac_key, shard)? {
+            return Err(CorrectionError::HmacMismatch { index: shard.index });
         }
     }
 
@@ -153,9 +160,11 @@ pub fn decode_shards(
     }
 
     // Create Reed-Solomon decoder
-    let rs = ReedSolomon::new(usize::from(data_shards), usize::from(parity_shards))
-        .map_err(|e| CorrectionError::ReedSolomonError {
-            reason: e.to_string(),
+    let rs =
+        ReedSolomon::new(usize::from(data_shards), usize::from(parity_shards)).map_err(|e| {
+            CorrectionError::ReedSolomonError {
+                reason: e.to_string(),
+            }
         })?;
 
     // Convert to Option<Vec<u8>> for RS decoder
@@ -186,87 +195,113 @@ pub fn decode_shards(
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     const HMAC_KEY: &[u8] = b"test_hmac_key_32_bytes_long_!!!";
 
     #[test]
-    fn test_encode_decode_roundtrip() {
+    fn test_encode_decode_roundtrip() -> TestResult {
         let data = b"The quick brown fox jumps over the lazy dog";
         let data_shards = 10;
         let parity_shards = 5;
 
-        let shards = encode_shards(data, data_shards, parity_shards, HMAC_KEY).expect("encode");
+        let shards = encode_shards(data, data_shards, parity_shards, HMAC_KEY)?;
         assert_eq!(shards.len(), 15);
 
         // Convert to Option<Shard>
         let opt_shards: Vec<Option<Shard>> = shards.into_iter().map(Some).collect();
 
-        let recovered =
-            decode_shards(&opt_shards, data_shards, parity_shards, HMAC_KEY, data.len())
-                .expect("decode");
+        let recovered = decode_shards(
+            &opt_shards,
+            data_shards,
+            parity_shards,
+            HMAC_KEY,
+            data.len(),
+        )?;
 
         assert_eq!(recovered.as_ref(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_decode_with_missing_shards() {
+    fn test_decode_with_missing_shards() -> TestResult {
         let data = b"The quick brown fox jumps over the lazy dog";
         let data_shards = 10;
         let parity_shards = 5;
 
-        let shards = encode_shards(data, data_shards, parity_shards, HMAC_KEY).expect("encode");
+        let shards = encode_shards(data, data_shards, parity_shards, HMAC_KEY)?;
 
         // Drop 5 shards (any 5)
         let mut opt_shards: Vec<Option<Shard>> = shards.into_iter().map(Some).collect();
-        opt_shards[0] = None;
-        opt_shards[3] = None;
-        opt_shards[7] = None;
-        opt_shards[10] = None;
-        opt_shards[13] = None;
+        *opt_shards.get_mut(0).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(3).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(7).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(10).ok_or("out of bounds")? = None;
+        *opt_shards.get_mut(13).ok_or("out of bounds")? = None;
 
-        let recovered =
-            decode_shards(&opt_shards, data_shards, parity_shards, HMAC_KEY, data.len())
-                .expect("decode with 5 missing");
+        let recovered = decode_shards(
+            &opt_shards,
+            data_shards,
+            parity_shards,
+            HMAC_KEY,
+            data.len(),
+        )?;
 
         assert_eq!(recovered.as_ref(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_decode_insufficient_shards() {
+    fn test_decode_insufficient_shards() -> TestResult {
         let data = b"test data";
         let data_shards = 10;
         let parity_shards = 5;
 
-        let shards = encode_shards(data, data_shards, parity_shards, HMAC_KEY).expect("encode");
+        let shards = encode_shards(data, data_shards, parity_shards, HMAC_KEY)?;
 
         // Drop 6 shards (too many)
         let mut opt_shards: Vec<Option<Shard>> = shards.into_iter().map(Some).collect();
         for i in 0..6 {
-            opt_shards[i] = None;
+            *opt_shards.get_mut(i).ok_or("out of bounds")? = None;
         }
 
-        let result = decode_shards(&opt_shards, data_shards, parity_shards, HMAC_KEY, data.len());
+        let result = decode_shards(
+            &opt_shards,
+            data_shards,
+            parity_shards,
+            HMAC_KEY,
+            data.len(),
+        );
         assert!(matches!(
             result,
             Err(CorrectionError::InsufficientShards { .. })
         ));
+        Ok(())
     }
 
     #[test]
-    fn test_decode_hmac_mismatch() {
+    fn test_decode_hmac_mismatch() -> TestResult {
         let data = b"test data";
         let data_shards = 10;
         let parity_shards = 5;
 
-        let mut shards =
-            encode_shards(data, data_shards, parity_shards, HMAC_KEY).expect("encode");
+        let mut shards = encode_shards(data, data_shards, parity_shards, HMAC_KEY)?;
 
         // Tamper with one shard's data
-        shards[0].data[0] ^= 0xFF;
+        let shard = shards.get_mut(0).ok_or("missing shard 0")?;
+        *shard.data.first_mut().ok_or("empty shard data")? ^= 0xFF;
 
         let opt_shards: Vec<Option<Shard>> = shards.into_iter().map(Some).collect();
 
-        let result = decode_shards(&opt_shards, data_shards, parity_shards, HMAC_KEY, data.len());
+        let result = decode_shards(
+            &opt_shards,
+            data_shards,
+            parity_shards,
+            HMAC_KEY,
+            data.len(),
+        );
         assert!(matches!(result, Err(CorrectionError::HmacMismatch { .. })));
+        Ok(())
     }
 
     #[test]

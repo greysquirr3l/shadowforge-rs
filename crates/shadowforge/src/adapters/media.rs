@@ -247,9 +247,9 @@ impl MediaLoader for AudioMediaLoader {
             })?;
 
         // Convert bytes back to i16 samples
-        for chunk in media.data.chunks(2) {
-            if chunk.len() == 2 {
-                let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+        for chunk in media.data.chunks_exact(2) {
+            if let Ok(pair) = <[u8; 2]>::try_from(chunk) {
+                let sample = i16::from_le_bytes(pair);
                 writer
                     .write_sample(sample)
                     .map_err(|e| MediaError::EncodeFailed {
@@ -273,10 +273,12 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn test_image_loader_png_roundtrip() {
+    fn test_image_loader_png_roundtrip() -> TestResult {
         let loader = ImageMediaLoader;
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("test.png");
 
         // Create a 10x10 white RGBA image
@@ -285,27 +287,28 @@ mod tests {
             10,
             image::Rgba([255, 255, 255, 255]),
         ));
-        img.save(&path).expect("save test image");
+        img.save(&path)?;
 
         // Load
-        let media = loader.load(&path).expect("load");
+        let media = loader.load(&path)?;
         assert_eq!(media.kind, CoverMediaKind::PngImage);
         assert_eq!(media.metadata.get(KEY_WIDTH), Some(&"10".to_string()));
         assert_eq!(media.metadata.get(KEY_HEIGHT), Some(&"10".to_string()));
 
         // Save
         let out_path = dir.path().join("out.png");
-        loader.save(&media, &out_path).expect("save");
+        loader.save(&media, &out_path)?;
 
         // Reload and verify
-        let reloaded = loader.load(&out_path).expect("reload");
+        let reloaded = loader.load(&out_path)?;
         assert_eq!(reloaded.data, media.data);
-    }
+        Ok(())
+}
 
     #[test]
-    fn test_audio_loader_wav_roundtrip() {
+    fn test_audio_loader_wav_roundtrip() -> TestResult {
         let loader = AudioMediaLoader;
-        let dir = tempdir().expect("create tempdir");
+        let dir = tempdir()?;
         let path = dir.path().join("test.wav");
 
         // Create a simple WAV with 1000 samples
@@ -316,14 +319,14 @@ mod tests {
             sample_format: hound::SampleFormat::Int,
         };
 
-        let mut writer = WavWriter::create(&path, spec).expect("create wav");
+        let mut writer = WavWriter::create(&path, spec)?;
         for i in 0..1000_i16 {
-            writer.write_sample(i).expect("write sample");
+            writer.write_sample(i)?;
         }
-        writer.finalize().expect("finalize wav");
+        writer.finalize()?;
 
         // Load
-        let media = loader.load(&path).expect("load");
+        let media = loader.load(&path)?;
         assert_eq!(media.kind, CoverMediaKind::WavAudio);
         assert_eq!(
             media.metadata.get(KEY_SAMPLE_RATE),
@@ -333,12 +336,13 @@ mod tests {
 
         // Save
         let out_path = dir.path().join("out.wav");
-        loader.save(&media, &out_path).expect("save");
+        loader.save(&media, &out_path)?;
 
         // Reload and verify
-        let reloaded = loader.load(&out_path).expect("reload");
+        let reloaded = loader.load(&out_path)?;
         assert_eq!(reloaded.data, media.data);
-    }
+        Ok(())
+}
 
     #[test]
     fn test_image_loader_unsupported_format() {

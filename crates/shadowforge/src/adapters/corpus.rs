@@ -158,31 +158,33 @@ impl CorpusIndex for CorpusIndexImpl {
 mod tests {
     use std::io::Write;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     use super::*;
 
     /// Create a minimal 1×1 BMP file with known pixel data.
-    fn make_test_bmp(pixel_rgb: [u8; 3]) -> Vec<u8> {
+    fn make_test_bmp(pixel_rgb: [u8; 3]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Minimal 1×1 24-bit BMP
         let mut bmp = Vec::new();
         // BMP header (14 bytes)
-        bmp.write_all(b"BM").expect("write");
+        bmp.write_all(b"BM")?;
         let file_size: u32 = 14 + 40 + 4; // header + DIB + 1 pixel (padded to 4 bytes)
-        bmp.write_all(&file_size.to_le_bytes()).expect("write");
-        bmp.write_all(&0u32.to_le_bytes()).expect("write"); // reserved
-        bmp.write_all(&54u32.to_le_bytes()).expect("write"); // pixel data offset
+        bmp.write_all(&file_size.to_le_bytes())?;
+        bmp.write_all(&0u32.to_le_bytes())?; // reserved
+        bmp.write_all(&54u32.to_le_bytes())?; // pixel data offset
 
         // DIB header (40 bytes - BITMAPINFOHEADER)
-        bmp.write_all(&40u32.to_le_bytes()).expect("write"); // header size
-        bmp.write_all(&1i32.to_le_bytes()).expect("write"); // width
-        bmp.write_all(&1i32.to_le_bytes()).expect("write"); // height
-        bmp.write_all(&1u16.to_le_bytes()).expect("write"); // color planes
-        bmp.write_all(&24u16.to_le_bytes()).expect("write"); // bits per pixel
-        bmp.write_all(&0u32.to_le_bytes()).expect("write"); // compression
-        bmp.write_all(&4u32.to_le_bytes()).expect("write"); // image size (padded row)
-        bmp.write_all(&2835i32.to_le_bytes()).expect("write"); // h resolution
-        bmp.write_all(&2835i32.to_le_bytes()).expect("write"); // v resolution
-        bmp.write_all(&0u32.to_le_bytes()).expect("write"); // colors in palette
-        bmp.write_all(&0u32.to_le_bytes()).expect("write"); // important colors
+        bmp.write_all(&40u32.to_le_bytes())?; // header size
+        bmp.write_all(&1i32.to_le_bytes())?; // width
+        bmp.write_all(&1i32.to_le_bytes())?; // height
+        bmp.write_all(&1u16.to_le_bytes())?; // color planes
+        bmp.write_all(&24u16.to_le_bytes())?; // bits per pixel
+        bmp.write_all(&0u32.to_le_bytes())?; // compression
+        bmp.write_all(&4u32.to_le_bytes())?; // image size (padded row)
+        bmp.write_all(&2835i32.to_le_bytes())?; // h resolution
+        bmp.write_all(&2835i32.to_le_bytes())?; // v resolution
+        bmp.write_all(&0u32.to_le_bytes())?; // colors in palette
+        bmp.write_all(&0u32.to_le_bytes())?; // important colors
 
         // Pixel data (BGR, padded to 4 bytes)
         bmp.push(pixel_rgb[2]); // B
@@ -190,64 +192,70 @@ mod tests {
         bmp.push(pixel_rgb[0]); // R
         bmp.push(0); // padding
 
-        bmp
+        Ok(bmp)
     }
 
     #[test]
-    fn build_index_counts_files() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn build_index_counts_files() -> TestResult {
+        let dir = tempfile::tempdir()?;
         for i in 0..5 {
             let path = dir.path().join(format!("img_{i}.bmp"));
-            std::fs::write(&path, make_test_bmp([i * 50, 0, 0])).expect("write");
+            std::fs::write(&path, make_test_bmp([i * 50, 0, 0])?)?;
         }
 
         let index = CorpusIndexImpl::new();
-        let count = index.build_index(dir.path()).expect("build_index");
+        let count = index.build_index(dir.path())?;
         assert_eq!(count, 5);
         assert_eq!(index.len(), 5);
-    }
+        Ok(())
+}
 
     #[test]
-    fn build_index_skips_non_image_files() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("readme.txt"), b"hello").expect("write");
-        std::fs::write(dir.path().join("img.bmp"), make_test_bmp([0, 0, 0])).expect("write");
+    fn build_index_skips_non_image_files() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("readme.txt"), b"hello")?;
+        std::fs::write(dir.path().join("img.bmp"), make_test_bmp([0, 0, 0])?)?;
 
         let index = CorpusIndexImpl::new();
-        let count = index.build_index(dir.path()).expect("build_index");
+        let count = index.build_index(dir.path())?;
         assert_eq!(count, 1);
-    }
+        Ok(())
+}
 
     #[test]
-    fn search_returns_exact_match_first() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let target_data = make_test_bmp([0xFF, 0xFF, 0xFF]);
+    fn search_returns_exact_match_first() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let target_data = make_test_bmp([0xFF, 0xFF, 0xFF])?;
         let target_path = dir.path().join("target.bmp");
-        std::fs::write(&target_path, &target_data).expect("write");
+        std::fs::write(&target_path, &target_data)?;
 
         // Add a different image too
-        std::fs::write(dir.path().join("other.bmp"), make_test_bmp([0, 0, 0])).expect("write");
+        std::fs::write(dir.path().join("other.bmp"), make_test_bmp([0, 0, 0])?)?;
 
         let index = CorpusIndexImpl::new();
-        index.build_index(dir.path()).expect("build");
+        index.build_index(dir.path())?;
 
         // Search with a payload that matches the target's bit pattern
         let target_hash: [u8; 32] = Sha256::digest(&target_data).into();
         let target_entry = index.entries.borrow();
         let expected_pattern = &target_entry
             .get(&target_hash)
-            .expect("entry exists")
+            .ok_or("target hash not found in index")?
             .precomputed_bit_pattern;
         let payload = Payload::from_bytes(expected_pattern.to_vec());
         drop(target_entry);
 
         let results = index
             .search(&payload, StegoTechnique::LsbImage, 5)
-            .expect("search");
+            ?;
         assert!(!results.is_empty());
         // First result should be the exact match
-        assert_eq!(results[0].file_hash, target_hash);
-    }
+        assert_eq!(
+            results.first().ok_or("no search results")?.file_hash,
+            target_hash
+        );
+        Ok(())
+}
 
     #[test]
     fn search_empty_index_returns_error() {
@@ -258,22 +266,24 @@ mod tests {
     }
 
     #[test]
-    fn add_to_index_rejects_unsupported_extension() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn add_to_index_rejects_unsupported_extension() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let path = dir.path().join("readme.txt");
-        std::fs::write(&path, b"not an image").expect("write");
+        std::fs::write(&path, b"not an image")?;
 
         let index = CorpusIndexImpl::new();
         assert!(index.add_to_index(&path).is_err());
-    }
+        Ok(())
+}
 
     #[test]
-    fn build_index_rejects_non_directory() {
-        let file = tempfile::NamedTempFile::new().expect("tmpfile");
+    fn build_index_rejects_non_directory() -> TestResult {
+        let file = tempfile::NamedTempFile::new()?;
         let index = CorpusIndexImpl::new();
         let result = index.build_index(file.path());
         assert!(result.is_err());
-    }
+        Ok(())
+}
 
     #[test]
     fn default_impl() {

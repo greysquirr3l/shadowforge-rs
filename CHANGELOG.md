@@ -9,7 +9,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Initial project scaffold (Phase 1)
+
+- **mdbook documentation site** — 39 pages covering user guide, CLI reference,
+  threat model, architecture, and contributing guidelines; published to
+  GitHub Pages via `docs.yml` workflow
+- **Shell completions** — `completions` subcommand now takes shell as a
+  positional argument; added `--output` flag to write directly to a file
+- **PDF install instructions** in README — pdfium binary download for
+  macOS (ARM/Intel) and Linux with `PDFIUM_DYNAMIC_LIB_PATH` setup
+- `make book` / `make book-serve` Makefile targets for local mdbook builds
+
+### Changed
+
+- **Tiered documentation publishing** — operational playbooks (`docs/src/opsec/`)
+  excluded from the published site to avoid exposing user behaviour patterns;
+  accessible only by cloning the repository
+- README overhauled: fixed broken image tag and dead links (`ARCHITECTURE.md`,
+  `docs/install-pdfium.md`), added docs site link, shell completions section,
+  inline PDF setup, and contributing guide link
+- `OPERATIONAL_SECURITY.md` moved to gitignore (content preserved in
+  `docs/src/opsec/` for repo cloners)
+
+### Fixed
+
+- **Lint hardening** — enabled `clippy::pedantic` and denied `expect_used`,
+  `unwrap_used`, `indexing_slicing` in Cargo.toml workspace lints; fixed 461
+  violations across 26 files (zero clippy warnings from CLI and IDE)
+- Replaced all `.unwrap()` / `.expect()` in non-test code with `?` or
+  explicit error handling
+- Replaced all direct indexing (`&vec[i]`, `&s[0..n]`) with `.get()` and
+  explicit bounds handling
 
 ---
 
@@ -18,6 +47,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 #### Core Bounded Contexts
+
 - ML-KEM-1024 key encapsulation (NIST FIPS 203)
 - ML-DSA-87 digital signatures (NIST FIPS 204)
 - AES-256-GCM symmetric encryption with Argon2id KDF
@@ -32,6 +62,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Capacity estimation and chi-square detectability analysis
 
 #### Nation-State Countermeasures
+
 - Adversarial embedding optimisation (STC-inspired, defeats Aletheia/StegExpose)
 - Camera model fingerprint matching for JPEG covers
 - Compression-survivable embedding for Instagram, Twitter, WhatsApp,
@@ -48,11 +79,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Forensic watermark tripwires for leak attribution
 
 #### Documentation
+
 - `THREAT_MODEL.md`: 7 threat classes with mitigations and residual risks
 - `OPERATIONAL_SECURITY.md`: Step-by-step journalist guide for 5 scenarios
 - `ARCHITECTURE.md`: Collapsed hexagonal / DDD-lite design rationale
 
 ### Security
+
 - All key material `ZeroizeOnDrop` throughout
 - Constant-time comparisons via `subtle` crate
 - No secrets in tracing output
@@ -60,6 +93,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `#![forbid(unsafe_code)]` at crate level
 
 ### Notes
+
 - Pre-production: external security audit pending (planned for v0.2.0)
 - PDF support requires pdfium system library — see README for installation
 

@@ -251,8 +251,10 @@ fn unpack_tar_gz(archive: &[u8]) -> Result<Vec<(String, Bytes)>, ArchiveError> {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn zip_round_trip() {
+    fn zip_round_trip() -> TestResult {
         let handler = ArchiveHandlerImpl::new();
         let files = vec![
             ("hello.txt", b"Hello, world!" as &[u8]),
@@ -260,20 +262,21 @@ mod tests {
         ];
         let packed = handler
             .pack(&files, ArchiveFormat::Zip)
-            .expect("pack should succeed");
+            ?;
         let unpacked = handler
             .unpack(&packed, ArchiveFormat::Zip)
-            .expect("unpack should succeed");
+            ?;
 
         assert_eq!(unpacked.len(), 2);
-        assert_eq!(unpacked[0].0, "hello.txt");
-        assert_eq!(unpacked[0].1.as_ref(), b"Hello, world!");
-        assert_eq!(unpacked[1].0, "data.bin");
-        assert_eq!(unpacked[1].1.as_ref(), &[0xDE, 0xAD, 0xBE, 0xEF]);
-    }
+        assert_eq!(unpacked.first().ok_or("index out of bounds")?.0, "hello.txt");
+        assert_eq!(unpacked.first().ok_or("index out of bounds")?.1.as_ref(), b"Hello, world!");
+        assert_eq!(unpacked.get(1).ok_or("index out of bounds")?.0, "data.bin");
+        assert_eq!(unpacked.get(1).ok_or("index out of bounds")?.1.as_ref(), &[0xDE, 0xAD, 0xBE, 0xEF]);
+        Ok(())
+}
 
     #[test]
-    fn tar_round_trip() {
+    fn tar_round_trip() -> TestResult {
         let handler = ArchiveHandlerImpl::new();
         let files = vec![
             ("file_a.txt", b"AAA" as &[u8]),
@@ -281,67 +284,71 @@ mod tests {
         ];
         let packed = handler
             .pack(&files, ArchiveFormat::Tar)
-            .expect("pack should succeed");
+            ?;
         let unpacked = handler
             .unpack(&packed, ArchiveFormat::Tar)
-            .expect("unpack should succeed");
+            ?;
 
         assert_eq!(unpacked.len(), 2);
-        assert_eq!(unpacked[0].1.as_ref(), b"AAA");
-        assert_eq!(unpacked[1].1.as_ref(), b"BBB");
-    }
+        assert_eq!(unpacked.first().ok_or("index out of bounds")?.1.as_ref(), b"AAA");
+        assert_eq!(unpacked.get(1).ok_or("index out of bounds")?.1.as_ref(), b"BBB");
+        Ok(())
+}
 
     #[test]
-    fn tar_gz_round_trip() {
+    fn tar_gz_round_trip() -> TestResult {
         let handler = ArchiveHandlerImpl::new();
         let files = vec![("compressed.txt", b"This is compressed" as &[u8])];
         let packed = handler
             .pack(&files, ArchiveFormat::TarGz)
-            .expect("pack should succeed");
+            ?;
         let unpacked = handler
             .unpack(&packed, ArchiveFormat::TarGz)
-            .expect("unpack should succeed");
+            ?;
 
         assert_eq!(unpacked.len(), 1);
-        assert_eq!(unpacked[0].1.as_ref(), b"This is compressed");
-    }
+        assert_eq!(unpacked.first().ok_or("index out of bounds")?.1.as_ref(), b"This is compressed");
+        Ok(())
+}
 
     #[test]
-    fn nested_zip_in_tar() {
+    fn nested_zip_in_tar() -> TestResult {
         let handler = ArchiveHandlerImpl::new();
 
         // Create inner ZIP
         let inner_files = vec![("inner.txt", b"nested file content" as &[u8])];
         let inner_zip = handler
             .pack(&inner_files, ArchiveFormat::Zip)
-            .expect("inner pack");
+            ?;
 
         // Create outer TAR containing the ZIP
         let outer_files = vec![("nested.zip", inner_zip.as_ref())];
         let outer_tar = handler
             .pack(&outer_files, ArchiveFormat::Tar)
-            .expect("outer pack");
+            ?;
 
         // Unpack with nesting
         let unpacked = handler
             .unpack(&outer_tar, ArchiveFormat::Tar)
-            .expect("unpack should succeed");
+            ?;
 
         // Should find the nested file with prefixed path
         assert_eq!(unpacked.len(), 1);
-        assert_eq!(unpacked[0].0, "nested.zip/inner.txt");
-        assert_eq!(unpacked[0].1.as_ref(), b"nested file content");
-    }
+        assert_eq!(unpacked.first().ok_or("index out of bounds")?.0, "nested.zip/inner.txt");
+        assert_eq!(unpacked.first().ok_or("index out of bounds")?.1.as_ref(), b"nested file content");
+        Ok(())
+}
 
     #[test]
-    fn format_detection_from_packed() {
+    fn format_detection_from_packed() -> TestResult {
         let handler = ArchiveHandlerImpl::new();
         let files = vec![("test.txt", b"x" as &[u8])];
 
-        let zip = handler.pack(&files, ArchiveFormat::Zip).expect("zip");
-        let tar_gz = handler.pack(&files, ArchiveFormat::TarGz).expect("tar.gz");
+        let zip = handler.pack(&files, ArchiveFormat::Zip)?;
+        let tar_gz = handler.pack(&files, ArchiveFormat::TarGz)?;
 
         assert_eq!(detect_format(&zip), Some(ArchiveFormat::Zip));
         assert_eq!(detect_format(&tar_gz), Some(ArchiveFormat::TarGz));
-    }
+        Ok(())
+}
 }

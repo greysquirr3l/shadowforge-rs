@@ -49,27 +49,31 @@ impl TimeLockService for TimeLockServiceImpl {
 mod tests {
     use super::*;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn adapter_roundtrip() {
+    fn adapter_roundtrip() -> TestResult {
         let service = TimeLockServiceImpl::default();
         let payload = Payload::from_bytes(b"adapter test".to_vec());
         let unlock_at = Utc::now();
 
-        let puzzle = service.lock(&payload, unlock_at).expect("lock");
-        let recovered = service.unlock(&puzzle).expect("unlock");
+        let puzzle = service.lock(&payload, unlock_at)?;
+        let recovered = service.unlock(&puzzle)?;
 
         assert_eq!(recovered.as_bytes(), payload.as_bytes());
-    }
+        Ok(())
+}
 
     #[test]
-    fn adapter_try_unlock_returns_none_for_future() {
+    fn adapter_try_unlock_returns_none_for_future() -> TestResult {
         let service = TimeLockServiceImpl::default();
         let payload = Payload::from_bytes(b"future test".to_vec());
         let unlock_at = Utc::now() + chrono::Duration::hours(24);
 
-        let puzzle = service.lock(&payload, unlock_at).expect("lock");
-        let result = service.try_unlock(&puzzle).expect("try_unlock");
+        let puzzle = service.lock(&payload, unlock_at)?;
+        let result = service.try_unlock(&puzzle)?;
 
         assert!(result.is_none());
-    }
+        Ok(())
+}
 }

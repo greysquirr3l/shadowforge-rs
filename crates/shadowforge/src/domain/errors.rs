@@ -556,7 +556,7 @@ mod tests {
             needed: 5,
             available: 2,
         };
-        assert!(e.to_string().contains("5"));
+        assert!(e.to_string().contains('5'));
     }
 
     #[test]

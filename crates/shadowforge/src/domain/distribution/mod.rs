@@ -128,38 +128,39 @@ pub fn pack_many_payloads(payloads: &[Payload]) -> Vec<u8> {
 /// Returns [`DistributionError::InsufficientCovers`] (repurposed) if the
 /// buffer is truncated.
 pub fn unpack_many_payloads(data: &[u8]) -> Result<Vec<Payload>, DistributionError> {
-    if data.len() < 4 {
-        return Err(DistributionError::InsufficientCovers {
+    let header = data.get(..4).ok_or(DistributionError::InsufficientCovers {
+        needed: 4,
+        got: data.len(),
+    })?;
+    let count = u32::from_le_bytes(<[u8; 4]>::try_from(header).map_err(|_| {
+        DistributionError::InsufficientCovers {
             needed: 4,
             got: data.len(),
-        });
-    }
-    let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        }
+    })?) as usize;
     let mut offset: usize = 4;
     let mut payloads = Vec::with_capacity(count);
     for _ in 0..count {
-        if offset.strict_add(4) > data.len() {
-            return Err(DistributionError::InsufficientCovers {
+        let len_slice = data.get(offset..offset.strict_add(4)).ok_or_else(|| {
+            DistributionError::InsufficientCovers {
                 needed: offset.strict_add(4),
                 got: data.len(),
-            });
-        }
-        let len = u32::from_le_bytes([
-            data[offset],
-            data[offset.strict_add(1)],
-            data[offset.strict_add(2)],
-            data[offset.strict_add(3)],
-        ]) as usize;
+            }
+        })?;
+        let len = u32::from_le_bytes(<[u8; 4]>::try_from(len_slice).map_err(|_| {
+            DistributionError::InsufficientCovers {
+                needed: offset.strict_add(4),
+                got: data.len(),
+            }
+        })?) as usize;
         offset = offset.strict_add(4);
-        if offset.strict_add(len) > data.len() {
-            return Err(DistributionError::InsufficientCovers {
+        let payload_slice = data.get(offset..offset.strict_add(len)).ok_or_else(|| {
+            DistributionError::InsufficientCovers {
                 needed: offset.strict_add(len),
                 got: data.len(),
-            });
-        }
-        payloads.push(Payload::from_bytes(
-            data[offset..offset.strict_add(len)].to_vec(),
-        ));
+            }
+        })?;
+        payloads.push(Payload::from_bytes(payload_slice.to_vec()));
         offset = offset.strict_add(len);
     }
     Ok(payloads)
@@ -168,6 +169,8 @@ pub fn unpack_many_payloads(data: &[u8]) -> Result<Vec<Payload>, DistributionErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     #[test]
     fn validate_cover_count_one_to_one_needs_one() {
@@ -237,18 +240,28 @@ mod tests {
     }
 
     #[test]
-    fn pack_unpack_round_trip() {
+    fn pack_unpack_round_trip() -> TestResult {
         let payloads = vec![
             Payload::from_bytes(b"hello".to_vec()),
             Payload::from_bytes(b"world".to_vec()),
             Payload::from_bytes(b"!".to_vec()),
         ];
         let packed = pack_many_payloads(&payloads);
-        let unpacked = unpack_many_payloads(&packed).expect("unpack should succeed");
+        let unpacked = unpack_many_payloads(&packed)?;
         assert_eq!(unpacked.len(), 3);
-        assert_eq!(unpacked[0].as_bytes(), b"hello");
-        assert_eq!(unpacked[1].as_bytes(), b"world");
-        assert_eq!(unpacked[2].as_bytes(), b"!");
+        assert_eq!(
+            unpacked.first().ok_or("index out of bounds")?.as_bytes(),
+            b"hello"
+        );
+        assert_eq!(
+            unpacked.get(1).ok_or("index out of bounds")?.as_bytes(),
+            b"world"
+        );
+        assert_eq!(
+            unpacked.get(2).ok_or("index out of bounds")?.as_bytes(),
+            b"!"
+        );
+        Ok(())
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # shadowforge-rs
 
-![Shadowforge](assets/img/shadowforge_logo.pngshadowforge_logo.png)
+![Shadowforge](assets/img/shadowforge_logo.png)
 
 > *"Forge secrets in the shadows, shield them from quantum eyes — and from the eyes of states."*
 
@@ -76,8 +76,37 @@ make release
 sudo install target/release/shadowforge /usr/local/bin/
 ```
 
-> **PDF support** requires the pdfium system library.
-> See [docs/install-pdfium.md](docs/install-pdfium.md) for platform instructions.
+### PDF Support (Optional)
+
+PDF page rasterisation requires the pdfium shared library. Without it,
+PDF content-stream and metadata steganography still work, but the
+render-to-PNG pipeline is unavailable.
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz | tar xz
+export PDFIUM_DYNAMIC_LIB_PATH="$(pwd)/lib"
+
+# macOS (Intel)
+curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz | tar xz
+export PDFIUM_DYNAMIC_LIB_PATH="$(pwd)/lib"
+
+# Linux (x86_64)
+curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz | tar xz
+export PDFIUM_DYNAMIC_LIB_PATH="$(pwd)/lib"
+```
+
+To persist the environment variable, add the `export` line to your shell
+profile (`~/.bashrc`, `~/.zshrc`, etc.).
+
+### Shell Completions
+
+```bash
+# Generate completions for your shell
+shadowforge completions bash > ~/.local/share/bash-completion/completions/shadowforge
+shadowforge completions zsh > ~/.zfunc/_shadowforge
+shadowforge completions fish > ~/.config/fish/completions/shadowforge.fish
+```
 
 ### Basic Usage
 
@@ -148,8 +177,6 @@ shadowforge embed --amnesia \
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
-
 **Cargo workspace mono-repo** — all crates live under `crates/`. The main
 crate is `crates/shadowforge`, organised as **Collapsed Hexagonal / DDD-lite**
 with four layers: `domain/` (pure, no I/O), `adapters/` (I/O and FFI),
@@ -160,6 +187,9 @@ type vocabulary (`domain/types.rs`). Nothing is re-invented per context.
 
 Future crates (`shadowforge-web`, `shadowforge-api`, etc.) add as new members
 under `crates/` — no restructuring required.
+
+See the full [architecture documentation](https://greysquirr3l.github.io/shadowforge-rs/architecture/design.html)
+for design rationale and bounded context details.
 
 ---
 
@@ -173,16 +203,23 @@ pressure, stylometric source identification.
 
 ---
 
-## Operational Security Guide
+## Operational Security
 
-See [OPERATIONAL_SECURITY.md](OPERATIONAL_SECURITY.md) for step-by-step
-procedures for five common journalist scenarios:
+Operational playbooks with step-by-step procedures for five common
+journalist scenarios are available in the source repository (clone to
+access). They cover border crossings, dead drops, geographic distribution,
+time-lock source protection, and zero-trace operation.
 
-1. Crossing a border with sensitive material
-2. Getting a document out via a public dead drop
-3. Distributing across trusted contacts with geographic threshold protection
-4. Source protection via time-lock payloads
-5. Zero-trace operation on an untrusted workstation
+See `docs/src/opsec/` after cloning.
+
+---
+
+## Documentation
+
+Full documentation is published at
+**[greysquirr3l.github.io/shadowforge-rs](https://greysquirr3l.github.io/shadowforge-rs/)**
+— covering CLI reference, threat model, architecture, and contributing
+guidelines.
 
 ---
 
@@ -196,7 +233,12 @@ make check      # fmt + lint + test + deny
 make coverage   # cargo tarpaulin (requires install)
 make deny       # cargo deny check
 make completions # generate shell completions
+make book       # build mdbook site locally
+make doc        # build rustdoc API docs
 ```
+
+See the [contributing guide](https://greysquirr3l.github.io/shadowforge-rs/contributing/setup.html)
+for full development setup instructions.
 
 ---
 
