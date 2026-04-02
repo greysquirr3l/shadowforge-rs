@@ -76,7 +76,10 @@ pub fn chi_square_score(data: &[u8]) -> f64 {
     let mut histogram = [0u64; 256];
     for &b in data {
         // usize::from(u8) is always 0..=255, histogram has 256 entries
-        #[expect(clippy::indexing_slicing, reason = "u8 index into [_; 256] cannot be out of bounds")]
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "u8 index into [_; 256] cannot be out of bounds"
+        )]
         {
             histogram[usize::from(b)] = histogram[usize::from(b)].strict_add(1);
         }
@@ -302,7 +305,9 @@ mod tests {
         // "hello world" has 11 grapheme clusters -> 11 / 4 = 2
         let cover = CoverMedia {
             kind: CoverMediaKind::PlainText,
-            data: Bytes::from("hello world, this is a test of capacity estimation for zero-width text"),
+            data: Bytes::from(
+                "hello world, this is a test of capacity estimation for zero-width text",
+            ),
             metadata: HashMap::new(),
         };
         let cap = estimate_capacity(&cover, StegoTechnique::ZeroWidthText);
@@ -318,7 +323,10 @@ mod tests {
     #[test]
     fn pdf_content_capacity_wrong_kind_returns_zero() {
         let cover = make_cover(CoverMediaKind::PngImage, 100_000);
-        assert_eq!(estimate_capacity(&cover, StegoTechnique::PdfContentStream), 0);
+        assert_eq!(
+            estimate_capacity(&cover, StegoTechnique::PdfContentStream),
+            0
+        );
     }
 
     #[test]

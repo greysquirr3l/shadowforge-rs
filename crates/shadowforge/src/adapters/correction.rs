@@ -46,13 +46,12 @@ impl ErrorCorrector for RsErrorCorrector {
         parity_shards: u8,
     ) -> Result<Bytes, CorrectionError> {
         // Calculate original data length from the first available shard
-        let first_shard = shards
-            .iter()
-            .find_map(|opt| opt.as_ref())
-            .ok_or_else(|| CorrectionError::InsufficientShards {
+        let first_shard = shards.iter().find_map(|opt| opt.as_ref()).ok_or_else(|| {
+            CorrectionError::InsufficientShards {
                 needed: usize::from(data_shards),
                 available: 0,
-            })?;
+            }
+        })?;
 
         // Original length is encoded in the first data shard's metadata
         // For now, we'll reconstruct all data and let the caller handle trimming
@@ -92,7 +91,7 @@ mod tests {
         // Recovered data may be padded, so check prefix
         assert!(recovered.starts_with(data));
         Ok(())
-}
+    }
 
     #[test]
     fn test_rs_error_corrector_with_missing_shards() -> TestResult {
@@ -113,7 +112,7 @@ mod tests {
         let recovered = corrector.decode(&opt_shards, 10, 5)?;
         assert!(recovered.starts_with(data));
         Ok(())
-}
+    }
 
     #[test]
     fn test_rs_error_corrector_insufficient_shards() -> TestResult {
@@ -135,5 +134,5 @@ mod tests {
             Err(CorrectionError::InsufficientShards { .. })
         ));
         Ok(())
-}
+    }
 }

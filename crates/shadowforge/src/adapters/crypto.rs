@@ -109,7 +109,7 @@ mod tests {
         let ss2 = enc.decapsulate(&kp.secret_key, &ct)?;
         assert_eq!(ss1.as_ref(), ss2.as_ref());
         Ok(())
-}
+    }
 
     #[test]
     fn test_signer_adapter_roundtrip() -> TestResult {
@@ -120,19 +120,20 @@ mod tests {
         let ok = signer.verify(&kp.public_key, msg, &sig)?;
         assert!(ok, "valid sig must verify via adapter");
         Ok(())
-}
+    }
 
     #[test]
     fn test_signer_adapter_wrong_message() -> TestResult {
         let signer = MlDsaSigner;
         let kp = signer.generate_keypair()?;
         let sig = signer.sign(&kp.secret_key, b"original")?;
-        let ok = signer
-            .verify(&kp.public_key, b"tampered", &sig)
-            ?;
-        assert!(!ok, "sig over original must not verify against tampered msg");
+        let ok = signer.verify(&kp.public_key, b"tampered", &sig)?;
+        assert!(
+            !ok,
+            "sig over original must not verify against tampered msg"
+        );
         Ok(())
-}
+    }
 
     #[test]
     fn test_symmetric_adapter_roundtrip() -> TestResult {
@@ -144,7 +145,7 @@ mod tests {
         let recovered = cipher.decrypt(&key, &nonce, &ciphertext)?;
         assert_eq!(recovered.as_ref(), plaintext);
         Ok(())
-}
+    }
 
     #[test]
     fn test_symmetric_adapter_tamper() -> TestResult {
@@ -157,5 +158,5 @@ mod tests {
         let result = cipher.decrypt(&key, &nonce, &ciphertext);
         assert!(result.is_err(), "tampered ciphertext must fail to decrypt");
         Ok(())
-}
+    }
 }

@@ -167,15 +167,13 @@ mod tests {
         };
         let covers = vec![make_cover()];
 
-        let (result_covers, canary) = service
-            .embed_canary(covers, &embedder)
-            ?;
+        let (result_covers, canary) = service.embed_canary(covers, &embedder)?;
 
         assert_eq!(result_covers.len(), 1);
         assert_eq!(canary.shard.data.len(), 64);
         assert_eq!(canary.shard.index, 5); // total_shards = 5, so canary index = 5
         Ok(())
-}
+    }
 
     #[test]
     fn embed_canary_fails_on_empty_covers() {
@@ -212,14 +210,12 @@ mod tests {
         };
         let covers = vec![make_cover(), make_cover()];
 
-        let (result_covers, canary) = service
-            .embed_canary(covers, &embedder)
-            ?;
+        let (result_covers, canary) = service.embed_canary(covers, &embedder)?;
 
         assert_eq!(result_covers.len(), 2);
         assert!(!canary.shard.data.is_empty());
         Ok(())
-}
+    }
 
     #[test]
     fn canary_shard_not_in_original_covers() -> TestResult {
@@ -232,14 +228,15 @@ mod tests {
         let original_data = original_cover.data.clone();
         let covers = vec![original_cover];
 
-        let (result_covers, _canary) = service
-            .embed_canary(covers, &embedder)
-            ?;
+        let (result_covers, _canary) = service.embed_canary(covers, &embedder)?;
 
         // Modified cover should differ from original
-        assert_ne!(result_covers.first().ok_or("index out of bounds")?.data, original_data);
+        assert_ne!(
+            result_covers.first().ok_or("index out of bounds")?.data,
+            original_data
+        );
         Ok(())
-}
+    }
 
     #[test]
     fn check_canary_returns_false_without_notify_url() {

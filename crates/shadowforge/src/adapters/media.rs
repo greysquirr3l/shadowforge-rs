@@ -40,12 +40,11 @@ pub struct ImageMediaLoader;
 impl MediaLoader for ImageMediaLoader {
     fn load(&self, path: &Path) -> Result<CoverMedia, MediaError> {
         // Detect format from extension
-        let extension = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| MediaError::UnsupportedFormat {
+        let extension = path.extension().and_then(|s| s.to_str()).ok_or_else(|| {
+            MediaError::UnsupportedFormat {
                 extension: "none".to_string(),
-            })?;
+            }
+        })?;
 
         let format = match extension.to_lowercase().as_str() {
             "png" => ImageFormat::Png,
@@ -55,7 +54,7 @@ impl MediaLoader for ImageMediaLoader {
             ext => {
                 return Err(MediaError::UnsupportedFormat {
                     extension: ext.to_string(),
-                })
+                });
             }
         };
 
@@ -117,9 +116,11 @@ impl MediaLoader for ImageMediaLoader {
             })?;
 
         // Reconstruct image from RGBA8 data
-        let img = image::RgbaImage::from_raw(width, height, media.data.to_vec())
-            .ok_or_else(|| MediaError::EncodeFailed {
-                reason: "invalid image dimensions or data length".to_string(),
+        let img =
+            image::RgbaImage::from_raw(width, height, media.data.to_vec()).ok_or_else(|| {
+                MediaError::EncodeFailed {
+                    reason: "invalid image dimensions or data length".to_string(),
+                }
             })?;
 
         let dynamic_img = DynamicImage::ImageRgba8(img);
@@ -133,7 +134,7 @@ impl MediaLoader for ImageMediaLoader {
             _ => {
                 return Err(MediaError::EncodeFailed {
                     reason: format!("unsupported media kind: {:?}", media.kind),
-                })
+                });
             }
         };
 
@@ -303,7 +304,7 @@ mod tests {
         let reloaded = loader.load(&out_path)?;
         assert_eq!(reloaded.data, media.data);
         Ok(())
-}
+    }
 
     #[test]
     fn test_audio_loader_wav_roundtrip() -> TestResult {
@@ -342,26 +343,20 @@ mod tests {
         let reloaded = loader.load(&out_path)?;
         assert_eq!(reloaded.data, media.data);
         Ok(())
-}
+    }
 
     #[test]
     fn test_image_loader_unsupported_format() {
         let loader = ImageMediaLoader;
         let result = loader.load(Path::new("test.xyz"));
-        assert!(matches!(
-            result,
-            Err(MediaError::UnsupportedFormat { .. })
-        ));
+        assert!(matches!(result, Err(MediaError::UnsupportedFormat { .. })));
     }
 
     #[test]
     fn test_image_loader_no_extension() {
         let loader = ImageMediaLoader;
         let result = loader.load(Path::new("test"));
-        assert!(matches!(
-            result,
-            Err(MediaError::UnsupportedFormat { .. })
-        ));
+        assert!(matches!(result, Err(MediaError::UnsupportedFormat { .. })));
     }
 
     #[test]

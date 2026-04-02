@@ -77,15 +77,13 @@ mod tests {
         // Uniform-ish data for low chi-square
         let data: Vec<u8> = (0..=255).cycle().take(256 * 40).collect();
         let cover = make_cover(CoverMediaKind::PngImage, data);
-        let report = analyser
-            .analyse(&cover, StegoTechnique::LsbImage)
-            ?;
+        let report = analyser.analyse(&cover, StegoTechnique::LsbImage)?;
 
         assert!(report.cover_capacity.bytes > 0);
         assert_eq!(report.detectability_risk, DetectabilityRisk::Low);
         assert!(report.recommended_max_payload_bytes > 0);
         Ok(())
-}
+    }
 
     #[test]
     fn analyse_returns_error_for_incompatible_type() {
@@ -99,37 +97,31 @@ mod tests {
     fn analyse_pdf_content_stream() -> TestResult {
         let analyser = CapacityAnalyserImpl::new();
         let cover = make_cover(CoverMediaKind::PdfDocument, vec![0u8; 50_000]);
-        let report = analyser
-            .analyse(&cover, StegoTechnique::PdfContentStream)
-            ?;
+        let report = analyser.analyse(&cover, StegoTechnique::PdfContentStream)?;
         assert!(report.cover_capacity.bytes > 0);
         Ok(())
-}
+    }
 
     #[test]
     fn analyse_corpus_selection_low_risk() -> TestResult {
         let analyser = CapacityAnalyserImpl::new();
         let data: Vec<u8> = (0..=255).cycle().take(256 * 32).collect();
         let cover = make_cover(CoverMediaKind::PngImage, data);
-        let report = analyser
-            .analyse(&cover, StegoTechnique::CorpusSelection)
-            ?;
+        let report = analyser.analyse(&cover, StegoTechnique::CorpusSelection)?;
         // Corpus selection should always be low risk if the cover data is uniform
         assert_eq!(report.detectability_risk, DetectabilityRisk::Low);
         Ok(())
-}
+    }
 
     #[test]
     fn report_serialises_to_json() -> TestResult {
         let analyser = CapacityAnalyserImpl::new();
         let data: Vec<u8> = (0..=255).cycle().take(8192).collect();
         let cover = make_cover(CoverMediaKind::PngImage, data);
-        let report = analyser
-            .analyse(&cover, StegoTechnique::LsbImage)
-            ?;
+        let report = analyser.analyse(&cover, StegoTechnique::LsbImage)?;
         let json = serde_json::to_string(&report)?;
         assert!(json.contains("\"technique\""));
         assert!(json.contains("\"chi_square_score\""));
         Ok(())
-}
+    }
 }

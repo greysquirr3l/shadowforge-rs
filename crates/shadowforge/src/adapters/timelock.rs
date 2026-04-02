@@ -62,7 +62,7 @@ mod tests {
 
         assert_eq!(recovered.as_bytes(), payload.as_bytes());
         Ok(())
-}
+    }
 
     #[test]
     fn adapter_try_unlock_returns_none_for_future() -> TestResult {
@@ -75,5 +75,5 @@ mod tests {
 
         assert!(result.is_none());
         Ok(())
-}
+    }
 }

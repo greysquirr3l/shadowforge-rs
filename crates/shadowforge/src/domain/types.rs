@@ -648,7 +648,7 @@ mod tests {
         let p = Payload::from_str_utf8("hello")?;
         assert_eq!(p.as_bytes(), b"hello");
         Ok(())
-}
+    }
 
     #[test]
     fn shard_round_trips_through_serde_json() -> TestResult {
@@ -665,7 +665,7 @@ mod tests {
         assert_eq!(decoded.data, &[1, 2, 3, 4]);
         assert_eq!(decoded.hmac_tag, [0xAB; 32]);
         Ok(())
-}
+    }
 
     #[test]
     fn watermark_receipt_display_contains_heading() -> TestResult {
@@ -678,7 +678,7 @@ mod tests {
         let s = receipt.to_string();
         assert!(s.contains("# Watermark Receipt"), "missing heading in: {s}");
         Ok(())
-}
+    }
 
     #[test]
     fn geographic_manifest_serialises_roundtrip() -> TestResult {
@@ -701,9 +701,12 @@ mod tests {
         let decoded: GeographicManifest = serde_json::from_str(&json)?;
         assert_eq!(decoded.minimum_jurisdictions, 2);
         assert_eq!(decoded.shards.len(), 2);
-        assert_eq!(decoded.shards.first().ok_or("no shards")?.jurisdiction, "DE");
+        assert_eq!(
+            decoded.shards.first().ok_or("no shards")?.jurisdiction,
+            "DE"
+        );
         Ok(())
-}
+    }
 
     #[test]
     fn deniable_key_set_both_keys_zeroized_on_explicit_call() {
