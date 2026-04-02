@@ -465,8 +465,9 @@ impl PanicWipeService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::{Capacity, CoverMediaKind};
+    use crate::domain::types::{Capacity, CoverMediaKind, Shard};
     use std::collections::HashMap;
+    use uuid::Uuid;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -650,5 +651,529 @@ mod tests {
         };
         let app_err = AppError::from(c_err);
         assert!(matches!(app_err, AppError::Corpus(_)));
+    }
+
+    // ─── KeyGenService ────────────────────────────────────────────────────
+
+    struct MockEncryptor;
+
+    impl Encryptor for MockEncryptor {
+        fn generate_keypair(&self) -> Result<KeyPair, CryptoError> {
+            Ok(KeyPair {
+                public_key: vec![1u8; 32],
+                secret_key: vec![2u8; 64],
+            })
+        }
+
+        fn encapsulate(&self, _public_key: &[u8]) -> Result<(Bytes, Bytes), CryptoError> {
+            Ok((Bytes::from(vec![3u8; 32]), Bytes::from(vec![4u8; 32])))
+        }
+
+        fn decapsulate(
+            &self,
+            _secret_key: &[u8],
+            _ciphertext: &[u8],
+        ) -> Result<Bytes, CryptoError> {
+            Ok(Bytes::from(vec![4u8; 32]))
+        }
+    }
+
+    struct MockSigner;
+
+    impl Signer for MockSigner {
+        fn generate_keypair(&self) -> Result<KeyPair, CryptoError> {
+            Ok(KeyPair {
+                public_key: vec![5u8; 32],
+                secret_key: vec![6u8; 32],
+            })
+        }
+
+        fn sign(&self, _secret_key: &[u8], _message: &[u8]) -> Result<Signature, CryptoError> {
+            Ok(Signature(Bytes::from(vec![7u8; 64])))
+        }
+
+        fn verify(
+            &self,
+            _public_key: &[u8],
+            _message: &[u8],
+            _signature: &Signature,
+        ) -> Result<bool, CryptoError> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn keygen_generate_keypair() -> TestResult {
+        let encryptor = MockEncryptor;
+        let kp = KeyGenService::generate_keypair(&encryptor)?;
+        assert_eq!(kp.public_key.len(), 32);
+        assert_eq!(kp.secret_key.len(), 64);
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_generate_signing_keypair() -> TestResult {
+        let signer = MockSigner;
+        let kp = KeyGenService::generate_signing_keypair(&signer)?;
+        assert_eq!(kp.public_key.len(), 32);
+        assert_eq!(kp.secret_key.len(), 32);
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_sign_and_verify() -> TestResult {
+        let signer = MockSigner;
+        let signature = KeyGenService::sign(&signer, &[0u8; 32], b"test message")?;
+        assert_eq!(signature.0.len(), 64);
+        let valid = KeyGenService::verify(&signer, &[0u8; 32], b"test message", &signature)?;
+        assert!(valid);
+        Ok(())
+    }
+
+    // ─── DistributeService ────────────────────────────────────────────────
+
+    struct MockDistributor;
+
+    impl crate::domain::ports::Distributor for MockDistributor {
+        fn distribute(
+            &self,
+            _payload: &Payload,
+            _profile: &EmbeddingProfile,
+            covers: Vec<CoverMedia>,
+            _embedder: &dyn EmbedTechnique,
+        ) -> Result<Vec<CoverMedia>, DistributionError> {
+            Ok(covers)
+        }
+    }
+
+    #[test]
+    fn distribute_service_returns_covers() -> TestResult {
+        let payload = Payload::from_bytes(b"payload".to_vec());
+        let covers = vec![make_cover(64), make_cover(64)];
+        let profile = EmbeddingProfile::Standard;
+        let distributor = MockDistributor;
+        let embedder = MockEmbedder;
+        let result =
+            DistributeService::distribute(&payload, covers, &profile, &distributor, &embedder)?;
+        assert_eq!(result.len(), 2);
+        Ok(())
+    }
+
+    // ─── ReconstructService ───────────────────────────────────────────────
+
+    struct MockReconstructor;
+
+    impl crate::domain::ports::Reconstructor for MockReconstructor {
+        fn reconstruct(
+            &self,
+            _covers: Vec<CoverMedia>,
+            _extractor: &dyn ExtractTechnique,
+            _progress_cb: &dyn Fn(usize, usize),
+        ) -> Result<Payload, ReconstructionError> {
+            Ok(Payload::from_bytes(b"reconstructed".to_vec()))
+        }
+    }
+
+    #[test]
+    fn reconstruct_service_returns_payload() -> TestResult {
+        let stego = vec![make_cover(128)];
+        let extractor = MockExtractor {
+            cover_prefix_len: 128,
+        };
+        let reconstructor = MockReconstructor;
+        let payload =
+            ReconstructService::reconstruct(stego, &extractor, &reconstructor, &|_, _| {})?;
+        assert_eq!(payload.as_bytes(), b"reconstructed");
+        Ok(())
+    }
+
+    // ─── DeniableEmbedService ─────────────────────────────────────────────
+
+    struct MockDeniableEmbedder;
+
+    impl DeniableEmbedder for MockDeniableEmbedder {
+        fn embed_dual(
+            &self,
+            cover: CoverMedia,
+            _pair: &DeniablePayloadPair,
+            _keys: &DeniableKeySet,
+            _embedder: &dyn EmbedTechnique,
+        ) -> Result<CoverMedia, crate::domain::errors::DeniableError> {
+            Ok(cover)
+        }
+
+        fn extract_with_key(
+            &self,
+            _stego: &CoverMedia,
+            _key: &[u8],
+            _extractor: &dyn ExtractTechnique,
+        ) -> Result<Payload, crate::domain::errors::DeniableError> {
+            Ok(Payload::from_bytes(b"deniable".to_vec()))
+        }
+    }
+
+    #[test]
+    fn deniable_embed_service_round_trip() -> TestResult {
+        let cover = make_cover(256);
+        let pair = DeniablePayloadPair {
+            real_payload: b"real".to_vec(),
+            decoy_payload: b"decoy".to_vec(),
+        };
+        let keys = DeniableKeySet {
+            primary_key: vec![1u8; 32],
+            decoy_key: vec![2u8; 32],
+        };
+        let embedder = MockEmbedder;
+        let deniable = MockDeniableEmbedder;
+
+        let stego = DeniableEmbedService::embed_dual(cover, &pair, &keys, &embedder, &deniable)?;
+        let extracted = DeniableEmbedService::extract_with_key(
+            &stego,
+            &[1u8; 32],
+            &MockExtractor {
+                cover_prefix_len: 256,
+            },
+            &deniable,
+        )?;
+        assert_eq!(extracted.as_bytes(), b"deniable");
+        Ok(())
+    }
+
+    // ─── DeadDropService ──────────────────────────────────────────────────
+
+    struct MockDeadDropEncoder;
+
+    impl DeadDropEncoder for MockDeadDropEncoder {
+        fn encode_for_platform(
+            &self,
+            cover: CoverMedia,
+            _payload: &Payload,
+            _platform: &PlatformProfile,
+            _embedder: &dyn EmbedTechnique,
+        ) -> Result<CoverMedia, DeadDropError> {
+            Ok(cover)
+        }
+    }
+
+    #[test]
+    fn dead_drop_service_encode() -> TestResult {
+        let cover = make_cover(128);
+        let payload = Payload::from_bytes(b"secret".to_vec());
+        let platform = PlatformProfile::Instagram;
+        let embedder = MockEmbedder;
+        let encoder = MockDeadDropEncoder;
+        let result = DeadDropService::encode(cover, &payload, &platform, &embedder, &encoder)?;
+        assert_eq!(result.kind, CoverMediaKind::PngImage);
+        Ok(())
+    }
+
+    // ─── TimeLockServiceApp ───────────────────────────────────────────────
+
+    struct MockTimeLockService;
+
+    impl TimeLockServicePort for MockTimeLockService {
+        fn lock(
+            &self,
+            payload: &Payload,
+            unlock_at: DateTime<Utc>,
+        ) -> Result<TimeLockPuzzle, TimeLockError> {
+            Ok(TimeLockPuzzle {
+                ciphertext: Bytes::from(payload.as_bytes().to_vec()),
+                modulus: vec![1],
+                start_value: vec![2],
+                squarings_required: 100,
+                created_at: Utc::now(),
+                unlock_at,
+            })
+        }
+
+        fn unlock(&self, puzzle: &TimeLockPuzzle) -> Result<Payload, TimeLockError> {
+            Ok(Payload::from_bytes(puzzle.ciphertext.to_vec()))
+        }
+
+        fn try_unlock(&self, puzzle: &TimeLockPuzzle) -> Result<Option<Payload>, TimeLockError> {
+            Ok(Some(Payload::from_bytes(puzzle.ciphertext.to_vec())))
+        }
+    }
+
+    #[test]
+    fn time_lock_service_lock_and_unlock() -> TestResult {
+        let payload = Payload::from_bytes(b"time locked".to_vec());
+        let service = MockTimeLockService;
+        let puzzle = TimeLockServiceApp::lock(&payload, Utc::now(), &service)?;
+        let recovered = TimeLockServiceApp::unlock(&puzzle, &service)?;
+        assert_eq!(recovered.as_bytes(), b"time locked");
+        Ok(())
+    }
+
+    #[test]
+    fn time_lock_service_try_unlock() -> TestResult {
+        let payload = Payload::from_bytes(b"try me".to_vec());
+        let service = MockTimeLockService;
+        let puzzle = TimeLockServiceApp::lock(&payload, Utc::now(), &service)?;
+        let result = TimeLockServiceApp::try_unlock(&puzzle, &service)?;
+        let recovered = result.ok_or("expected Some")?;
+        assert_eq!(recovered.as_bytes(), b"try me");
+        Ok(())
+    }
+
+    // ─── CanaryShardService ───────────────────────────────────────────────
+
+    struct MockCanaryService;
+
+    impl CanaryServicePort for MockCanaryService {
+        fn embed_canary(
+            &self,
+            covers: Vec<CoverMedia>,
+            _embedder: &dyn EmbedTechnique,
+        ) -> Result<(Vec<CoverMedia>, CanaryShard), CanaryError> {
+            let shard = CanaryShard {
+                shard: Shard {
+                    index: 99,
+                    total: 100,
+                    data: vec![0u8; 16],
+                    hmac_tag: [0u8; 32],
+                },
+                canary_id: Uuid::new_v4(),
+                notify_url: Some("https://example.com/canary".into()),
+            };
+            Ok((covers, shard))
+        }
+
+        fn check_canary(&self, _shard: &CanaryShard) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn canary_shard_service_embed_and_check() -> TestResult {
+        let covers = vec![make_cover(64)];
+        let embedder = MockEmbedder;
+        let canary = MockCanaryService;
+        let (result_covers, shard) = CanaryShardService::embed_canary(covers, &embedder, &canary)?;
+        assert_eq!(result_covers.len(), 1);
+        assert_eq!(shard.shard.index, 99);
+        assert!(!CanaryShardService::check_canary(&shard, &canary));
+        Ok(())
+    }
+
+    // ─── ForensicService ──────────────────────────────────────────────────
+
+    struct MockForensicWatermarker;
+
+    impl ForensicWatermarker for MockForensicWatermarker {
+        fn embed_tripwire(
+            &self,
+            cover: CoverMedia,
+            _tag: &WatermarkTripwireTag,
+        ) -> Result<CoverMedia, OpsecError> {
+            Ok(cover)
+        }
+
+        fn identify_recipient(
+            &self,
+            _stego: &CoverMedia,
+            tags: &[WatermarkTripwireTag],
+        ) -> Result<Option<WatermarkReceipt>, OpsecError> {
+            if tags.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some(WatermarkReceipt {
+                recipient: tags
+                    .first()
+                    .map_or_else(String::new, |t| t.recipient_id.to_string()),
+                algorithm: "lsb".into(),
+                shards: vec![0],
+                created_at: Utc::now(),
+            }))
+        }
+    }
+
+    #[test]
+    fn forensic_service_embed_and_identify() -> TestResult {
+        let cover = make_cover(128);
+        let tag = WatermarkTripwireTag {
+            recipient_id: Uuid::new_v4(),
+            embedding_seed: vec![9u8; 16],
+        };
+        let watermarker = MockForensicWatermarker;
+
+        let stego = ForensicService::embed_tripwire(cover, &tag, &watermarker)?;
+        let receipt = ForensicService::identify_recipient(&stego, &[tag], &watermarker)?;
+        let r = receipt.ok_or("expected Some")?;
+        assert!(!r.recipient.is_empty());
+        assert_eq!(r.algorithm, "lsb");
+        Ok(())
+    }
+
+    #[test]
+    fn forensic_service_identify_no_tags() -> TestResult {
+        let cover = make_cover(128);
+        let watermarker = MockForensicWatermarker;
+        let receipt = ForensicService::identify_recipient(&cover, &[], &watermarker)?;
+        assert!(receipt.is_none());
+        Ok(())
+    }
+
+    // ─── PanicWipeService ─────────────────────────────────────────────────
+
+    struct MockPanicWiper;
+
+    impl PanicWiper for MockPanicWiper {
+        fn wipe(&self, _config: &PanicWipeConfig) -> Result<(), OpsecError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn panic_wipe_service_succeeds() -> TestResult {
+        let wiper = MockPanicWiper;
+        let config = PanicWipeConfig {
+            key_paths: vec![],
+            config_paths: vec![],
+            temp_dirs: vec![],
+        };
+        PanicWipeService::wipe(&config, &wiper)?;
+        Ok(())
+    }
+
+    // ─── AmnesiaPipelineService ───────────────────────────────────────────
+
+    struct MockAmnesiaPipeline;
+
+    impl AmnesiaPipeline for MockAmnesiaPipeline {
+        fn embed_in_memory(
+            &self,
+            payload_input: &mut dyn Read,
+            _cover_input: &mut dyn Read,
+            output: &mut dyn Write,
+            _technique: &dyn EmbedTechnique,
+        ) -> Result<(), OpsecError> {
+            let mut buf = Vec::new();
+            payload_input
+                .read_to_end(&mut buf)
+                .map_err(|e| OpsecError::PipelineError {
+                    reason: e.to_string(),
+                })?;
+            output
+                .write_all(&buf)
+                .map_err(|e| OpsecError::PipelineError {
+                    reason: e.to_string(),
+                })?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn amnesia_pipeline_service_embed() -> TestResult {
+        let pipeline = MockAmnesiaPipeline;
+        let embedder = MockEmbedder;
+        let mut payload_input = std::io::Cursor::new(b"secret payload");
+        let mut cover_input = std::io::Cursor::new(vec![0u8; 128]);
+        let mut output = Vec::new();
+
+        AmnesiaPipelineService::embed_in_memory(
+            &mut payload_input,
+            &mut cover_input,
+            &mut output,
+            &embedder,
+            &pipeline,
+        )?;
+
+        assert_eq!(output, b"secret payload");
+        Ok(())
+    }
+
+    // ─── Remaining AppError coverage ──────────────────────────────────────
+
+    #[test]
+    fn app_error_wraps_reconstruction() {
+        let err = ReconstructionError::InsufficientCovers { needed: 3, got: 1 };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Reconstruction(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_correction() {
+        let err = CorrectionError::InsufficientShards {
+            needed: 3,
+            available: 1,
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Correction(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_analysis() {
+        let err = AnalysisError::UnsupportedCoverType {
+            reason: "test".into(),
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Analysis(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_archive() {
+        let err = ArchiveError::PackFailed {
+            reason: "test".into(),
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Archive(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_opsec() {
+        let err = OpsecError::PipelineError {
+            reason: "test".into(),
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Opsec(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_scrubber() {
+        let err = ScrubberError::ProfileNotSatisfied {
+            reason: "test".into(),
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Scrubber(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_adaptive() {
+        let err = AdaptiveError::BudgetNotMet {
+            achieved_db: -5.0,
+            target_db: -10.0,
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Adaptive(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_canary() {
+        let err = CanaryError::EmbedFailed {
+            source: StegoError::NoPayloadFound,
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::Canary(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_dead_drop() {
+        let err = DeadDropError::EncodeFailed {
+            reason: "test".into(),
+        };
+        let app_err = AppError::from(err);
+        assert!(matches!(app_err, AppError::DeadDrop(_)));
+    }
+
+    #[test]
+    fn app_error_display_formats() {
+        let err = AppError::Crypto(CryptoError::KeyGenFailed {
+            reason: "oops".into(),
+        });
+        let msg = format!("{err}");
+        assert!(msg.contains("crypto"));
+        assert!(msg.contains("oops"));
     }
 }

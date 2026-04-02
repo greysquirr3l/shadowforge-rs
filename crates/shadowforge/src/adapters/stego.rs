@@ -1898,4 +1898,407 @@ mod tests {
         }
         Ok(())
     }
+
+    // ─── Additional edge-case stego tests ─────────────────────────────────
+
+    #[test]
+    fn test_lsb_image_wrong_cover_type_embed() {
+        let embedder = LsbImage::new();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: vec![0u8; 100].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+        let result = embedder.embed(cover, &payload);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_lsb_image_wrong_cover_type_extract() {
+        let embedder = LsbImage::new();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::JpegImage,
+            data: vec![0u8; 100].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let result = embedder.extract(&cover);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_lsb_image_missing_width_metadata() {
+        let embedder = LsbImage::new();
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("height".to_string(), "100".to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 30000].into(),
+            metadata,
+        };
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::MalformedCoverData { .. })));
+    }
+
+    #[test]
+    fn test_lsb_image_missing_height_metadata() {
+        let embedder = LsbImage::new();
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), "100".to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 30000].into(),
+            metadata,
+        };
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::MalformedCoverData { .. })));
+    }
+
+    #[test]
+    fn test_lsb_image_invalid_width_metadata() {
+        let embedder = LsbImage::new();
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), "not_a_number".to_string());
+        metadata.insert("height".to_string(), "100".to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 30000].into(),
+            metadata,
+        };
+        let result = embedder.capacity(&cover);
+        assert!(matches!(result, Err(StegoError::MalformedCoverData { .. })));
+    }
+
+    #[test]
+    fn test_lsb_image_wrong_cover_type_capacity() {
+        let embedder = LsbImage::new();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::GifImage,
+            data: vec![0u8; 100].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let result = embedder.capacity(&cover);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_lsb_audio_wrong_cover_type() {
+        let embedder = LsbAudio::new();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 1000].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+        let result = embedder.embed(cover, &payload);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_lsb_audio_wrong_cover_type_extract() {
+        let embedder = LsbAudio::new();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 1000].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let result = embedder.extract(&cover);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_lsb_audio_wrong_cover_type_capacity() {
+        let embedder = LsbAudio::new();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 1000].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let result = embedder.capacity(&cover);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_pdf_content_stream_wrong_cover_type() {
+        let processor = Box::new(PdfProcessorImpl::default());
+        let embedder = PdfContentStreamLsb::new(processor);
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 100].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+        let result = embedder.embed(cover, &payload);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_pdf_metadata_wrong_cover_type() {
+        let processor = Box::new(PdfProcessorImpl::default());
+        let embedder = PdfMetadataEmbed::new(processor);
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 100].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let payload = Payload::from_bytes(vec![1, 2, 3]);
+        let result = embedder.embed(cover, &payload);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_pdf_content_stream_extract_wrong_cover_type() {
+        let processor = Box::new(PdfProcessorImpl::default());
+        let embedder = PdfContentStreamLsb::new(processor);
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: vec![0u8; 100].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let result = embedder.extract(&cover);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_pdf_metadata_extract_wrong_cover_type() {
+        let processor = Box::new(PdfProcessorImpl::default());
+        let embedder = PdfMetadataEmbed::new(processor);
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: vec![0u8; 100].into(),
+            metadata: std::collections::HashMap::new(),
+        };
+        let result = embedder.extract(&cover);
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    // ─── Stub technique tests ─────────────────────────────────────────────
+
+    fn dummy_cover() -> CoverMedia {
+        CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: vec![0u8; 64].into(),
+            metadata: std::collections::HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn dct_jpeg_stub_capacity_returns_error() {
+        let dct = DctJpeg::new();
+        assert!(dct.capacity(&dummy_cover()).is_err());
+        assert_eq!(EmbedTechnique::technique(&dct), StegoTechnique::DctJpeg);
+    }
+
+    #[test]
+    fn dct_jpeg_stub_embed_returns_error() {
+        let dct = DctJpeg::new();
+        let result = dct.embed(dummy_cover(), &Payload::from_bytes(vec![1]));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn dct_jpeg_stub_extract_returns_error() {
+        let dct = DctJpeg::new();
+        let result = dct.extract(&dummy_cover());
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+        assert_eq!(ExtractTechnique::technique(&dct), StegoTechnique::DctJpeg);
+    }
+
+    #[test]
+    fn palette_stego_stub_capacity_returns_error() {
+        let pal = PaletteStego::new();
+        assert!(pal.capacity(&dummy_cover()).is_err());
+        assert_eq!(EmbedTechnique::technique(&pal), StegoTechnique::Palette);
+    }
+
+    #[test]
+    fn palette_stego_stub_embed_returns_error() {
+        let pal = PaletteStego::new();
+        let result = pal.embed(dummy_cover(), &Payload::from_bytes(vec![1]));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn palette_stego_stub_extract_returns_error() {
+        let pal = PaletteStego::new();
+        let result = pal.extract(&dummy_cover());
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+        assert_eq!(ExtractTechnique::technique(&pal), StegoTechnique::Palette);
+    }
+
+    #[test]
+    fn phase_encoding_stub_capacity_returns_error() {
+        let pe = PhaseEncoding::new();
+        assert!(pe.capacity(&dummy_cover()).is_err());
+        assert_eq!(
+            EmbedTechnique::technique(&pe),
+            StegoTechnique::PhaseEncoding
+        );
+    }
+
+    #[test]
+    fn phase_encoding_stub_embed_returns_error() {
+        let pe = PhaseEncoding::new();
+        let result = pe.embed(dummy_cover(), &Payload::from_bytes(vec![1]));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn phase_encoding_stub_extract_returns_error() {
+        let pe = PhaseEncoding::new();
+        let result = pe.extract(&dummy_cover());
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+        assert_eq!(
+            ExtractTechnique::technique(&pe),
+            StegoTechnique::PhaseEncoding
+        );
+    }
+
+    #[test]
+    fn echo_hiding_stub_capacity_returns_error() {
+        let eh = EchoHiding::new();
+        assert!(eh.capacity(&dummy_cover()).is_err());
+        assert_eq!(EmbedTechnique::technique(&eh), StegoTechnique::EchoHiding);
+    }
+
+    #[test]
+    fn echo_hiding_stub_embed_returns_error() {
+        let eh = EchoHiding::new();
+        let result = eh.embed(dummy_cover(), &Payload::from_bytes(vec![1]));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn echo_hiding_stub_extract_returns_error() {
+        let eh = EchoHiding::new();
+        let result = eh.extract(&dummy_cover());
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+        assert_eq!(ExtractTechnique::technique(&eh), StegoTechnique::EchoHiding);
+    }
+
+    #[test]
+    fn zero_width_text_stub_capacity_returns_error() {
+        let zwt = ZeroWidthText::new();
+        assert!(zwt.capacity(&dummy_cover()).is_err());
+        assert_eq!(
+            EmbedTechnique::technique(&zwt),
+            StegoTechnique::ZeroWidthText
+        );
+    }
+
+    #[test]
+    fn zero_width_text_stub_embed_returns_error() {
+        let zwt = ZeroWidthText::new();
+        let result = zwt.embed(dummy_cover(), &Payload::from_bytes(vec![1]));
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+    }
+
+    #[test]
+    fn zero_width_text_stub_extract_returns_error() {
+        let zwt = ZeroWidthText::new();
+        let result = zwt.extract(&dummy_cover());
+        assert!(matches!(
+            result,
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+        assert_eq!(
+            ExtractTechnique::technique(&zwt),
+            StegoTechnique::ZeroWidthText
+        );
+    }
+
+    #[test]
+    fn lsb_image_insufficient_capacity() {
+        let embedder = LsbImage::new();
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("width".to_string(), "2".to_string());
+        metadata.insert("height".to_string(), "2".to_string());
+        metadata.insert("channels".to_string(), "3".to_string());
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            // 12 bytes = 2x2x3 pixels, capacity = 12/8 = 1 byte minus header
+            data: vec![0u8; 12].into(),
+            metadata,
+        };
+        // Payload larger than capacity
+        let payload = Payload::from_bytes(vec![0xAB; 100]);
+        let result = embedder.embed(cover, &payload);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn lsb_audio_insufficient_capacity() {
+        let embedder = LsbAudio::new();
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("bits_per_sample".to_string(), "16".to_string());
+        let cover = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            // Very little audio data — only a few samples
+            data: vec![0u8; 10].into(),
+            metadata,
+        };
+        let payload = Payload::from_bytes(vec![0xAB; 100]);
+        let result = embedder.embed(cover, &payload);
+        assert!(result.is_err());
+    }
 }

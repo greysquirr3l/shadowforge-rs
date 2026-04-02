@@ -299,6 +299,100 @@ mod tests {
     }
 
     #[test]
+    fn pattern_from_profile_non_standard_returns_one_to_one() {
+        let adaptive = EmbeddingProfile::Adaptive {
+            max_detectability_db: 0.5,
+        };
+        let pattern = pattern_from_profile(&adaptive, 5);
+        assert_eq!(pattern, DistributionPattern::OneToOne);
+
+        let corpus = EmbeddingProfile::CorpusBased;
+        let pattern = pattern_from_profile(&corpus, 10);
+        assert_eq!(pattern, DistributionPattern::OneToOne);
+    }
+
+    #[test]
+    fn distribute_via_trait_many_to_many_replicate() -> TestResult {
+        let covers = vec![make_cover(256), make_cover(256)];
+        let payload = Payload::from_bytes(vec![0xAA; 20]);
+        let result = distribute_many_to_many(
+            &payload,
+            covers,
+            &MockEmbedder,
+            crate::domain::types::ManyToManyMode::Stripe,
+        )?;
+        // Each chunk goes to one cover in stripe mode
+        assert_eq!(result.len(), 2);
+        for cover in &result {
+            assert!(cover.data.len() > 256);
+        }
+        Ok(())
+    }
+
+    /// Embedder that always fails — for testing error propagation.
+    struct FailEmbedder;
+
+    impl EmbedTechnique for FailEmbedder {
+        fn technique(&self) -> StegoTechnique {
+            StegoTechnique::LsbImage
+        }
+
+        fn capacity(&self, _cover: &CoverMedia) -> Result<Capacity, StegoError> {
+            Ok(Capacity {
+                bytes: 0,
+                technique: StegoTechnique::LsbImage,
+            })
+        }
+
+        fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
+            Err(StegoError::PayloadTooLarge {
+                available: 0,
+                needed: 1,
+            })
+        }
+    }
+
+    #[test]
+    fn distribute_one_to_one_embed_failure() {
+        let covers = vec![make_cover(64)];
+        let payload = Payload::from_bytes(b"data".to_vec());
+        let result = distribute_one_to_one(&payload, covers, &FailEmbedder);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn distribute_one_to_many_embed_failure() {
+        let covers: Vec<CoverMedia> = (0..4).map(|_| make_cover(256)).collect();
+        let payload = Payload::from_bytes(vec![0xBB; 32]);
+        let result = distribute_one_to_many(&payload, covers, &FailEmbedder, 3, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn distribute_many_to_many_embed_failure() {
+        let covers = vec![make_cover(128), make_cover(128)];
+        let payload = Payload::from_bytes(vec![0xCC; 20]);
+        let result = distribute_many_to_many(
+            &payload,
+            covers,
+            &FailEmbedder,
+            crate::domain::types::ManyToManyMode::Replicate,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn distribute_default_impl() -> TestResult {
+        let distributor = DistributorImpl;
+        let payload = Payload::from_bytes(b"hello".to_vec());
+        let covers = vec![make_cover(128)];
+        let result =
+            distributor.distribute(&payload, &EmbeddingProfile::Standard, covers, &MockEmbedder)?;
+        assert_eq!(result.len(), 1);
+        Ok(())
+    }
+
+    #[test]
     fn pack_unpack_multiple_payloads_for_many_to_one() -> TestResult {
         let payloads = vec![
             Payload::from_bytes(b"payload_a".to_vec()),

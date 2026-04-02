@@ -743,4 +743,97 @@ mod tests {
         assert!(result.is_none());
         Ok(())
     }
+
+    #[test]
+    fn wipe_dir_recursive_nonexistent() {
+        let result = SecurePanicWiper::wipe_dir_recursive(Path::new("/nonexistent/dir"));
+        assert!(result.is_err());
+        if let Err(msg) = result {
+            assert!(msg.contains("does not exist"));
+        }
+    }
+
+    #[test]
+    fn wipe_dir_recursive_not_a_directory() -> TestResult {
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.path().join("regular_file.txt");
+        fs::write(&file_path, b"data")?;
+
+        let result = SecurePanicWiper::wipe_dir_recursive(&file_path);
+        assert!(result.is_err());
+        if let Err(msg) = result {
+            assert!(msg.contains("not a directory"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wipe_config_with_temp_dirs() -> TestResult {
+        let temp_dir = TempDir::new()?;
+        let temp_subdir = temp_dir.path().join("cache");
+        fs::create_dir_all(&temp_subdir)?;
+        let cache_file = temp_subdir.join("cached.dat");
+        fs::write(&cache_file, b"cached stuff")?;
+
+        let config_file = temp_dir.path().join("settings.toml");
+        fs::write(&config_file, b"[settings]\nkey = true")?;
+
+        let wipe_config = PanicWipeConfig {
+            key_paths: vec![],
+            config_paths: vec![config_file.clone()],
+            temp_dirs: vec![temp_subdir.clone()],
+        };
+
+        let wiper = SecurePanicWiper::new();
+        wiper.wipe(&wipe_config)?;
+
+        assert!(!config_file.exists());
+        assert!(!temp_subdir.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn wipe_config_with_missing_temp_dir_returns_error() -> TestResult {
+        let temp_dir = TempDir::new()?;
+        let nonexistent_dir = temp_dir.path().join("no_such_dir");
+
+        let wipe_config = PanicWipeConfig {
+            key_paths: vec![],
+            config_paths: vec![],
+            temp_dirs: vec![nonexistent_dir],
+        };
+
+        let wiper = SecurePanicWiper::new();
+        let result = wiper.wipe(&wipe_config);
+        assert!(matches!(result, Err(OpsecError::WipeStepFailed { .. })));
+        Ok(())
+    }
+
+    #[test]
+    fn wipe_large_file() -> TestResult {
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.path().join("large.dat");
+        // Create a file larger than 4096 bytes to exercise multi-chunk loop
+        let data = vec![0x42u8; 8192];
+        fs::write(&file_path, &data)?;
+
+        SecurePanicWiper::wipe_file(&file_path)?;
+        assert!(!file_path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn geographic_distributor_extra_covers_ignored() -> TestResult {
+        let distributor = GeographicDistributorImpl::new();
+        let payload = Payload::from_bytes(b"data for geographic dist".to_vec());
+        // 5 covers for only 3 manifest shards — extras get dropped
+        let covers = test_covers(5);
+        let manifest = test_geo_manifest();
+
+        let results =
+            distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)?;
+        // Only 3 manifest shards, so only 3 results
+        assert_eq!(results.len(), 3);
+        Ok(())
+    }
 }

@@ -295,4 +295,43 @@ mod tests {
             2
         );
     }
+
+    #[test]
+    fn assign_many_to_many_random_different_seeds_differ() {
+        let a1 = assign_many_to_many(ManyToManyMode::Random, 10, 5, 1);
+        let a2 = assign_many_to_many(ManyToManyMode::Random, 10, 5, 2);
+        assert_ne!(
+            a1, a2,
+            "different seeds should produce different assignments"
+        );
+    }
+
+    #[test]
+    fn pack_empty_payloads() -> TestResult {
+        let packed = pack_many_payloads(&[]);
+        let unpacked = unpack_many_payloads(&packed)?;
+        assert!(unpacked.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn assign_one_to_many_single_cover() {
+        let assignments = assign_one_to_many(3, 1);
+        // All shards go to the single cover
+        assert_eq!(assignments, vec![(0, 0), (1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn diagonal_single_cover_no_secondary() {
+        let assignments = assign_many_to_many(ManyToManyMode::Diagonal, 2, 1, 0);
+        // With 1 cover, primary == secondary, so just one entry
+        assert_eq!(assignments, vec![vec![0], vec![0]]);
+    }
+
+    #[test]
+    fn unpack_truncated_at_length_prefix() {
+        // 4-byte count says "1 payload", but no payload length follows
+        let data: Vec<u8> = vec![1, 0, 0, 0];
+        assert!(unpack_many_payloads(&data).is_err());
+    }
 }

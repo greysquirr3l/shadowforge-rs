@@ -266,4 +266,122 @@ mod tests {
         let cap = estimate_capacity(&cover, StegoTechnique::PdfContentStream);
         assert!(cap > 0);
     }
+
+    // ─── Additional capacity estimator coverage ───────────────────────────
+
+    #[test]
+    fn jpeg_dct_capacity_for_jpeg() {
+        let cover = make_cover(CoverMediaKind::JpegImage, 16_000);
+        let cap = estimate_capacity(&cover, StegoTechnique::DctJpeg);
+        assert_eq!(cap, 1000); // 16000 / 16
+    }
+
+    #[test]
+    fn jpeg_dct_capacity_wrong_kind_returns_zero() {
+        let cover = make_cover(CoverMediaKind::PngImage, 16_000);
+        assert_eq!(estimate_capacity(&cover, StegoTechnique::DctJpeg), 0);
+    }
+
+    #[test]
+    fn palette_capacity_for_gif() {
+        let cover = make_cover(CoverMediaKind::GifImage, 4096);
+        let cap = estimate_capacity(&cover, StegoTechnique::Palette);
+        assert!(cap > 0);
+        // (4096 - 128) / 32 = 124
+        assert_eq!(cap, 124);
+    }
+
+    #[test]
+    fn palette_capacity_wrong_kind_returns_zero() {
+        let cover = make_cover(CoverMediaKind::WavAudio, 4096);
+        assert_eq!(estimate_capacity(&cover, StegoTechnique::Palette), 0);
+    }
+
+    #[test]
+    fn text_capacity_for_plain_text() {
+        // "hello world" has 11 grapheme clusters -> 11 / 4 = 2
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PlainText,
+            data: Bytes::from("hello world, this is a test of capacity estimation for zero-width text"),
+            metadata: HashMap::new(),
+        };
+        let cap = estimate_capacity(&cover, StegoTechnique::ZeroWidthText);
+        assert!(cap > 0);
+    }
+
+    #[test]
+    fn text_capacity_wrong_kind_returns_zero() {
+        let cover = make_cover(CoverMediaKind::PngImage, 1000);
+        assert_eq!(estimate_capacity(&cover, StegoTechnique::ZeroWidthText), 0);
+    }
+
+    #[test]
+    fn pdf_content_capacity_wrong_kind_returns_zero() {
+        let cover = make_cover(CoverMediaKind::PngImage, 100_000);
+        assert_eq!(estimate_capacity(&cover, StegoTechnique::PdfContentStream), 0);
+    }
+
+    #[test]
+    fn pdf_metadata_capacity_always_256() {
+        let cover = make_cover(CoverMediaKind::PdfDocument, 1000);
+        assert_eq!(estimate_capacity(&cover, StegoTechnique::PdfMetadata), 256);
+        // Even for non-PDF types, metadata capacity is fixed
+        let cover2 = make_cover(CoverMediaKind::PngImage, 1000);
+        assert_eq!(estimate_capacity(&cover2, StegoTechnique::PdfMetadata), 256);
+    }
+
+    #[test]
+    fn audio_lsb_wrong_kind_returns_zero() {
+        let cover = make_cover(CoverMediaKind::PngImage, 44100);
+        assert_eq!(estimate_capacity(&cover, StegoTechnique::LsbAudio), 0);
+    }
+
+    #[test]
+    fn phase_encoding_is_audio_lsb_div_8() {
+        let cover = make_cover(CoverMediaKind::WavAudio, 44100);
+        let audio_cap = estimate_capacity(&cover, StegoTechnique::LsbAudio);
+        let phase_cap = estimate_capacity(&cover, StegoTechnique::PhaseEncoding);
+        assert_eq!(phase_cap, audio_cap / 8);
+    }
+
+    #[test]
+    fn echo_hiding_same_as_phase_encoding() {
+        let cover = make_cover(CoverMediaKind::WavAudio, 44100);
+        let phase_cap = estimate_capacity(&cover, StegoTechnique::PhaseEncoding);
+        let echo_cap = estimate_capacity(&cover, StegoTechnique::EchoHiding);
+        assert_eq!(phase_cap, echo_cap);
+    }
+
+    #[test]
+    fn dual_payload_is_half_image_lsb() {
+        let cover = make_cover(CoverMediaKind::PngImage, 8192);
+        let lsb_cap = estimate_capacity(&cover, StegoTechnique::LsbImage);
+        let dual_cap = estimate_capacity(&cover, StegoTechnique::DualPayload);
+        assert_eq!(dual_cap, lsb_cap / 2);
+    }
+
+    #[test]
+    fn gif_lsb_image_capacity() {
+        let cover = make_cover(CoverMediaKind::GifImage, 4096);
+        let cap = estimate_capacity(&cover, StegoTechnique::LsbImage);
+        // (4096 - 128) / 16 = 248
+        assert_eq!(cap, 248);
+    }
+
+    #[test]
+    fn bmp_lsb_same_as_png() {
+        let cover_png = make_cover(CoverMediaKind::PngImage, 8192);
+        let cover_bmp = make_cover(CoverMediaKind::BmpImage, 8192);
+        assert_eq!(
+            estimate_capacity(&cover_png, StegoTechnique::LsbImage),
+            estimate_capacity(&cover_bmp, StegoTechnique::LsbImage)
+        );
+    }
+
+    #[test]
+    fn palette_capacity_for_png() {
+        let cover = make_cover(CoverMediaKind::PngImage, 4096);
+        let cap = estimate_capacity(&cover, StegoTechnique::Palette);
+        assert_eq!(cap, 124); // Same formula as GIF
+    }
 }
