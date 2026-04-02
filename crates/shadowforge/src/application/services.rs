@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::domain::errors::{
-    AdaptiveError, AnalysisError, ArchiveError, CanaryError, CorrectionError, CryptoError,
-    DeadDropError, DeniableError, DistributionError, OpsecError, ReconstructionError,
+    AdaptiveError, AnalysisError, ArchiveError, CanaryError, CorpusError, CorrectionError,
+    CryptoError, DeadDropError, DeniableError, DistributionError, OpsecError, ReconstructionError,
     ScrubberError, StegoError, TimeLockError,
 };
 use crate::domain::ports::{
@@ -73,6 +73,9 @@ pub enum AppError {
     /// Time-lock puzzle error.
     #[error("time-lock: {0}")]
     TimeLock(#[from] TimeLockError),
+    /// Corpus selection error.
+    #[error("corpus: {0}")]
+    Corpus(#[from] CorpusError),
 }
 
 // ─── EmbedService ─────────────────────────────────────────────────────────────
@@ -631,5 +634,14 @@ mod tests {
         };
         let app_err = AppError::from(tl_err);
         assert!(matches!(app_err, AppError::TimeLock(_)));
+    }
+
+    #[test]
+    fn app_error_wraps_corpus() {
+        let c_err = CorpusError::IndexError {
+            reason: "test".into(),
+        };
+        let app_err = AppError::from(c_err);
+        assert!(matches!(app_err, AppError::Corpus(_)));
     }
 }
