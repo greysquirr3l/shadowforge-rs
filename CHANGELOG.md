@@ -40,6 +40,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Replaced all direct indexing (`&vec[i]`, `&s[0..n]`) with `.get()` and
   explicit bounds handling
 
+### Testing
+
+- **Test coverage raised to 85%** (2039/2397 lines) — 380 tests, 0 failures
+- Added 128 new unit tests across all adapter and domain modules:
+  application/services (34 tests, 100%), domain/analysis (98.6%),
+  domain/crypto (93.5%), domain/distribution (89.2%), domain/types (100%),
+  adapters/stego (84.5%), adapters/media (86.4%), adapters/archive (86%),
+  adapters/opsec (88%), adapters/distribution (82.4%)
+- Added `tarpaulin.toml` to exclude CLI dispatch layer from coverage metrics
+
 ---
 
 ## [0.1.0] — TBD

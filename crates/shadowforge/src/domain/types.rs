@@ -752,5 +752,175 @@ mod tests {
         assert!(json.contains("DctJpeg"));
         assert!(json.contains("Low"));
         Ok(())
-}
+    }
+
+    #[test]
+    fn payload_debug_redacted() {
+        let p = Payload::from_bytes(b"secret".to_vec());
+        let dbg = format!("{p:?}");
+        assert!(dbg.contains("len"));
+        assert!(!dbg.contains("secret"));
+    }
+
+    #[test]
+    fn payload_empty() {
+        let p = Payload::from_bytes(Vec::new());
+        assert!(p.is_empty());
+        assert_eq!(p.len(), 0);
+    }
+
+    #[test]
+    fn keypair_debug_redacted() {
+        let kp = KeyPair {
+            public_key: vec![1u8; 32],
+            secret_key: vec![2u8; 32],
+        };
+        let dbg = format!("{kp:?}");
+        assert!(dbg.contains("[redacted]"));
+        assert!(dbg.contains("public_key_len"));
+    }
+
+    #[test]
+    fn shard_debug_redacted() {
+        let s = Shard {
+            index: 0,
+            total: 5,
+            data: vec![0u8; 100],
+            hmac_tag: [0u8; 32],
+        };
+        let dbg = format!("{s:?}");
+        assert!(dbg.contains("[redacted]"));
+        assert!(dbg.contains("data_len"));
+    }
+
+    #[test]
+    fn deniable_payload_pair_debug_redacted() {
+        let pair = DeniablePayloadPair {
+            real_payload: vec![1u8; 50],
+            decoy_payload: vec![2u8; 30],
+        };
+        let dbg = format!("{pair:?}");
+        assert!(dbg.contains("real_len"));
+        assert!(dbg.contains("decoy_len"));
+    }
+
+    #[test]
+    fn deniable_key_set_debug_redacted() {
+        let ks = DeniableKeySet {
+            primary_key: vec![1u8; 32],
+            decoy_key: vec![2u8; 32],
+        };
+        let dbg = format!("{ks:?}");
+        assert!(dbg.contains("[redacted]"));
+        assert!(!dbg.contains("\\x01"));
+    }
+
+    #[test]
+    fn watermark_tripwire_tag_debug_redacted() {
+        let tag = WatermarkTripwireTag {
+            recipient_id: Uuid::nil(),
+            embedding_seed: vec![0xFF; 16],
+        };
+        let dbg = format!("{tag:?}");
+        assert!(dbg.contains("[redacted]"));
+    }
+
+    #[test]
+    fn watermark_tripwire_tag_clone() {
+        let tag = WatermarkTripwireTag {
+            recipient_id: Uuid::new_v4(),
+            embedding_seed: vec![0xAA; 32],
+        };
+        let cloned = tag.clone();
+        assert_eq!(tag.recipient_id, cloned.recipient_id);
+        assert_eq!(tag.embedding_seed, cloned.embedding_seed);
+    }
+
+    #[test]
+    fn time_lock_puzzle_serialises() -> TestResult {
+        let puzzle = TimeLockPuzzle {
+            ciphertext: Bytes::from(vec![1u8; 32]),
+            modulus: vec![2u8; 16],
+            start_value: vec![3u8; 16],
+            squarings_required: 1000,
+            created_at: Utc::now(),
+            unlock_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&puzzle)?;
+        assert!(json.contains("squarings_required"));
+        Ok(())
+    }
+
+    #[test]
+    fn retrieval_manifest_serialises() -> TestResult {
+        let manifest = RetrievalManifest {
+            platform: PlatformProfile::Instagram,
+            retrieval_url: "https://example.com/post/123".into(),
+            technique: StegoTechnique::LsbImage,
+            stego_hash: "abcdef123456".into(),
+        };
+        let json = serde_json::to_string(&manifest)?;
+        let decoded: RetrievalManifest = serde_json::from_str(&json)?;
+        assert_eq!(decoded.retrieval_url, "https://example.com/post/123");
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_entry_serialises() -> TestResult {
+        let entry = CorpusEntry {
+            file_hash: [0xAB; 32],
+            path: "images/cover.png".into(),
+            cover_kind: CoverMediaKind::PngImage,
+            precomputed_bit_pattern: Bytes::from(vec![0u8; 16]),
+        };
+        let json = serde_json::to_string(&entry)?;
+        assert!(json.contains("images/cover.png"));
+        Ok(())
+    }
+
+    #[test]
+    fn stylo_profile_default_values() {
+        let profile = StyloProfile {
+            target_vocab_size: 500,
+            target_avg_sentence_len: 15.0,
+            normalize_punctuation: true,
+        };
+        assert!(profile.normalize_punctuation);
+        assert_eq!(profile.target_vocab_size, 500);
+    }
+
+    #[test]
+    fn archive_format_variants_are_distinct() {
+        assert_ne!(ArchiveFormat::Zip, ArchiveFormat::Tar);
+        assert_ne!(ArchiveFormat::Tar, ArchiveFormat::TarGz);
+        assert_ne!(ArchiveFormat::Zip, ArchiveFormat::TarGz);
+    }
+
+    #[test]
+    fn canary_shard_serialises() -> TestResult {
+        let shard = CanaryShard {
+            shard: Shard {
+                index: 0,
+                total: 3,
+                data: vec![1, 2, 3],
+                hmac_tag: [0u8; 32],
+            },
+            canary_id: Uuid::new_v4(),
+            notify_url: Some("https://example.com/canary".into()),
+        };
+        let json = serde_json::to_string(&shard)?;
+        assert!(json.contains("canary_id"));
+        Ok(())
+    }
+
+    #[test]
+    fn panic_wipe_config_debug() {
+        let config = PanicWipeConfig {
+            key_paths: vec![std::path::PathBuf::from("/tmp/key")],
+            config_paths: vec![],
+            temp_dirs: vec![],
+        };
+        let dbg = format!("{config:?}");
+        assert!(dbg.contains("key_paths"));
+    }
 }

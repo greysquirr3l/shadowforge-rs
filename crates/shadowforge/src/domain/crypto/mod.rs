@@ -807,4 +807,109 @@ mod tests {
         assert!(result.is_err(), "wrong DSA key must fail verification");
         Ok(())
     }
+
+    // ─── Additional edge-case coverage ────────────────────────────────────
+
+    /// KDF with wrong salt length must return `KdfFailed`.
+    #[test]
+    fn test_kdf_bad_salt_length() {
+        let result = derive_key(b"password", &[0u8; 16], AES_KEY_LEN);
+        assert!(matches!(result, Err(CryptoError::KdfFailed { .. })));
+    }
+
+    /// DSA sign with wrong secret key length must return `InvalidKeyLength`.
+    #[test]
+    fn test_dsa_sign_bad_key_length() {
+        let result = sign_dsa(&[0u8; 16], b"message");
+        assert!(matches!(result, Err(CryptoError::InvalidKeyLength { .. })));
+    }
+
+    /// DSA verify with wrong public key length must return `InvalidKeyLength`.
+    #[test]
+    fn test_dsa_verify_bad_pubkey_length() {
+        let sig = Signature(Bytes::from(vec![0u8; 64]));
+        let result = verify_dsa(&[0u8; 16], b"message", &sig);
+        assert!(matches!(result, Err(CryptoError::InvalidKeyLength { .. })));
+    }
+
+    /// KEM decapsulate with invalid ciphertext length must return `DecapsulationFailed`.
+    #[test]
+    fn test_kem_bad_ciphertext_length() -> TestResult {
+        let kp = generate_kem_keypair(&mut rng())?;
+        let result = decapsulate_kem(&kp.secret_key, &[0u8; 42]);
+        assert!(matches!(
+            result,
+            Err(CryptoError::DecapsulationFailed { .. })
+        ));
+        Ok(())
+    }
+
+    /// AES decrypt with bad key length must return `InvalidKeyLength`.
+    #[test]
+    fn test_aes_decrypt_bad_key_length() {
+        let result = decrypt_aes_gcm(&[0u8; 16], &[0u8; AES_NONCE_LEN], &[0u8; 32]);
+        assert!(matches!(result, Err(CryptoError::InvalidKeyLength { .. })));
+    }
+
+    /// AES decrypt with bad nonce length must return `InvalidNonceLength`.
+    #[test]
+    fn test_aes_decrypt_bad_nonce_length() {
+        let result = decrypt_aes_gcm(&[0u8; AES_KEY_LEN], &[0u8; 8], &[0u8; 32]);
+        assert!(matches!(
+            result,
+            Err(CryptoError::InvalidNonceLength { .. })
+        ));
+    }
+
+    /// Decrypt pipeline with truncated input must return `DecryptionFailed`.
+    #[test]
+    fn test_decrypt_pipeline_truncated_empty() {
+        let result = decrypt_payload(&[0u8; KEM_SEED_LEN], &[0u8; DSA_VK_LEN], &[]);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed { .. })));
+    }
+
+    /// Decrypt pipeline with truncated input after `kem_ct_len` must return `DecryptionFailed`.
+    #[test]
+    fn test_decrypt_pipeline_truncated_after_header() {
+        let result = decrypt_payload(&[0u8; KEM_SEED_LEN], &[0u8; DSA_VK_LEN], &[0u8; 8]);
+        assert!(matches!(result, Err(CryptoError::DecryptionFailed { .. })));
+    }
+
+    /// DSA verify with malformed signature (wrong length) must return `VerificationFailed`.
+    #[test]
+    fn test_dsa_verify_bad_sig_length() -> TestResult {
+        let kp = generate_dsa_keypair(&mut rng())?;
+        let bad_sig = Signature(Bytes::from(vec![0u8; 10])); // Too short
+        let result = verify_dsa(&kp.public_key, b"message", &bad_sig);
+        assert!(
+            matches!(result, Err(CryptoError::VerificationFailed { .. })),
+            "expected VerificationFailed, got {result:?}"
+        );
+        Ok(())
+    }
+
+    /// Empty plaintext encrypts and decrypts correctly.
+    #[test]
+    fn test_aes_empty_plaintext() -> TestResult {
+        let key = vec![0u8; AES_KEY_LEN];
+        let nonce = vec![1u8; AES_NONCE_LEN];
+        let ciphertext = encrypt_aes_gcm(&key, &nonce, &[])?;
+        let recovered = decrypt_aes_gcm(&key, &nonce, &ciphertext)?;
+        assert!(recovered.is_empty());
+        Ok(())
+    }
+
+    /// Full pipeline with empty payload.
+    #[test]
+    fn test_pipeline_empty_payload() -> TestResult {
+        let kem_kp = generate_kem_keypair(&mut rng())?;
+        let dsa_kp = generate_dsa_keypair(&mut rng())?;
+        let payload = crate::domain::types::Payload::from_bytes(Vec::new());
+
+        let encrypted =
+            encrypt_payload(&kem_kp.public_key, &dsa_kp.secret_key, &payload, &mut rng())?;
+        let recovered = decrypt_payload(&kem_kp.secret_key, &dsa_kp.public_key, &encrypted)?;
+        assert!(recovered.is_empty());
+        Ok(())
+    }
 }

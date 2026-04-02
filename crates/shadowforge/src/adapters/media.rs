@@ -353,4 +353,171 @@ mod tests {
             Err(MediaError::UnsupportedFormat { .. })
         ));
     }
+
+    #[test]
+    fn test_image_loader_no_extension() {
+        let loader = ImageMediaLoader;
+        let result = loader.load(Path::new("test"));
+        assert!(matches!(
+            result,
+            Err(MediaError::UnsupportedFormat { .. })
+        ));
+    }
+
+    #[test]
+    fn test_image_loader_bmp_roundtrip() -> TestResult {
+        let loader = ImageMediaLoader;
+        let dir = tempdir()?;
+        let path = dir.path().join("test.bmp");
+
+        let img = DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            5,
+            5,
+            image::Rgba([128, 64, 32, 255]),
+        ));
+        img.save(&path)?;
+
+        let media = loader.load(&path)?;
+        assert_eq!(media.kind, CoverMediaKind::BmpImage);
+        assert_eq!(media.metadata.get(KEY_WIDTH), Some(&"5".to_string()));
+        assert_eq!(media.metadata.get(KEY_HEIGHT), Some(&"5".to_string()));
+
+        let out_path = dir.path().join("out.bmp");
+        loader.save(&media, &out_path)?;
+        let reloaded = loader.load(&out_path)?;
+        assert_eq!(reloaded.data, media.data);
+        Ok(())
+    }
+
+    #[test]
+    fn test_image_loader_jpeg_can_load() -> TestResult {
+        let loader = ImageMediaLoader;
+        let dir = tempdir()?;
+        let path = dir.path().join("test.jpg");
+
+        let img = DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            8,
+            8,
+            image::Rgba([200, 100, 50, 255]),
+        ));
+        img.save(&path)?;
+
+        let media = loader.load(&path)?;
+        assert_eq!(media.kind, CoverMediaKind::JpegImage);
+        Ok(())
+    }
+
+    #[test]
+    fn test_image_save_unsupported_kind() {
+        let loader = ImageMediaLoader;
+        let media = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: Bytes::from(vec![0u8; 100]),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert(KEY_WIDTH.to_string(), "10".to_string());
+                m.insert(KEY_HEIGHT.to_string(), "10".to_string());
+                m
+            },
+        };
+        let result = loader.save(&media, Path::new("/tmp/test.wav"));
+        assert!(matches!(result, Err(MediaError::EncodeFailed { .. })));
+    }
+
+    #[test]
+    fn test_image_save_missing_width() {
+        let loader = ImageMediaLoader;
+        let media = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: Bytes::from(vec![0u8; 100]),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert(KEY_HEIGHT.to_string(), "10".to_string());
+                m
+            },
+        };
+        let result = loader.save(&media, Path::new("/tmp/test.png"));
+        assert!(matches!(result, Err(MediaError::EncodeFailed { .. })));
+    }
+
+    #[test]
+    fn test_image_save_missing_height() {
+        let loader = ImageMediaLoader;
+        let media = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: Bytes::from(vec![0u8; 100]),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert(KEY_WIDTH.to_string(), "10".to_string());
+                m
+            },
+        };
+        let result = loader.save(&media, Path::new("/tmp/test.png"));
+        assert!(matches!(result, Err(MediaError::EncodeFailed { .. })));
+    }
+
+    #[test]
+    fn test_audio_save_missing_sample_rate() {
+        let loader = AudioMediaLoader;
+        let media = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: Bytes::from(vec![0u8; 100]),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert(KEY_CHANNELS.to_string(), "1".to_string());
+                m.insert(KEY_BITS_PER_SAMPLE.to_string(), "16".to_string());
+                m
+            },
+        };
+        let result = loader.save(&media, Path::new("/tmp/test.wav"));
+        assert!(matches!(result, Err(MediaError::EncodeFailed { .. })));
+    }
+
+    #[test]
+    fn test_audio_save_missing_channels() {
+        let loader = AudioMediaLoader;
+        let media = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: Bytes::from(vec![0u8; 100]),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert(KEY_SAMPLE_RATE.to_string(), "44100".to_string());
+                m.insert(KEY_BITS_PER_SAMPLE.to_string(), "16".to_string());
+                m
+            },
+        };
+        let result = loader.save(&media, Path::new("/tmp/test.wav"));
+        assert!(matches!(result, Err(MediaError::EncodeFailed { .. })));
+    }
+
+    #[test]
+    fn test_audio_save_missing_bits_per_sample() {
+        let loader = AudioMediaLoader;
+        let media = CoverMedia {
+            kind: CoverMediaKind::WavAudio,
+            data: Bytes::from(vec![0u8; 100]),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert(KEY_SAMPLE_RATE.to_string(), "44100".to_string());
+                m.insert(KEY_CHANNELS.to_string(), "1".to_string());
+                m
+            },
+        };
+        let result = loader.save(&media, Path::new("/tmp/test.wav"));
+        assert!(matches!(result, Err(MediaError::EncodeFailed { .. })));
+    }
+
+    #[test]
+    fn test_image_load_nonexistent_file() {
+        let loader = ImageMediaLoader;
+        let result = loader.load(Path::new("/nonexistent/path/image.png"));
+        assert!(matches!(result, Err(MediaError::DecodeFailed { .. })));
+    }
+
+    #[test]
+    fn test_audio_load_nonexistent_file() {
+        let loader = AudioMediaLoader;
+        let result = loader.load(Path::new("/nonexistent/path/audio.wav"));
+        assert!(matches!(result, Err(MediaError::DecodeFailed { .. })));
+    }
 }
