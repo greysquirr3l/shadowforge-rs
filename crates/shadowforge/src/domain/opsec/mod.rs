@@ -13,8 +13,7 @@ use zeroize::Zeroize;
 use crate::domain::errors::OpsecError;
 use crate::domain::ports::EmbedTechnique;
 use crate::domain::types::{
-    CoverMedia, CoverMediaKind, GeoShardEntry, GeographicManifest, Payload,
-    WatermarkTripwireTag,
+    CoverMedia, CoverMediaKind, GeoShardEntry, GeographicManifest, Payload, WatermarkTripwireTag,
 };
 
 /// Read all bytes from a reader into a `Vec<u8>`, zeroizing on error.
@@ -59,18 +58,18 @@ pub fn embed_in_memory(
     payload_bytes.zeroize();
 
     // Step 3: Embed
-    let stego = technique.embed(cover, &payload).map_err(|e| {
-        OpsecError::PipelineError {
+    let stego = technique
+        .embed(cover, &payload)
+        .map_err(|e| OpsecError::PipelineError {
             reason: format!("embed failed: {e}"),
-        }
-    })?;
+        })?;
 
     // Step 4: Write output
-    output.write_all(&stego.data).map_err(|e| {
-        OpsecError::PipelineError {
+    output
+        .write_all(&stego.data)
+        .map_err(|e| OpsecError::PipelineError {
             reason: format!("failed to write output: {e}"),
-        }
-    })?;
+        })?;
 
     Ok(())
 }
@@ -334,11 +333,7 @@ mod tests {
             })
         }
 
-        fn embed(
-            &self,
-            _cover: CoverMedia,
-            _payload: &Payload,
-        ) -> Result<CoverMedia, StegoError> {
+        fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
             Err(StegoError::MalformedCoverData {
                 reason: "forced failure".into(),
             })
