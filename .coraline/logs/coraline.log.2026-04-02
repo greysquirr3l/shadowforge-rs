@@ -1,4 +1,0 @@
-2026-04-02T02:59:41.640631Z  INFO coraline: coraline starting
-2026-04-02T02:59:41.934098Z  INFO sync{root=/Users/nickcampbell/Projects/rust/shadowforge-rs}: coraline::extraction: sync complete files_added=0 files_modified=1 files_removed=0 nodes_updated=14 duration_ms=293
-2026-04-02T03:07:56.062025Z  INFO coraline: coraline starting
-2026-04-02T03:07:56.368762Z  INFO sync{root=/Users/nickcampbell/Projects/rust/shadowforge-rs}: coraline::extraction: sync complete files_added=1 files_modified=3 files_removed=0 nodes_updated=52 duration_ms=306

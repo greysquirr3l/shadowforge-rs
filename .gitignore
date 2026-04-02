@@ -13,3 +13,15 @@ IMPLEMENTATION_PLAN.md
 PROGRESS.md
 rust-catchup-1.78-1.94.1.md
 tasks/
+CLAUDE.md
+
+/coverage/
+# Cargo.lock      # not committed for libraries; committed for binaries — we are a binary
+*.pub
+*.puzzle
+*.receipt.md
+completions/
+.env
+.env.local
+*.DS_Store
+/corpus-index/

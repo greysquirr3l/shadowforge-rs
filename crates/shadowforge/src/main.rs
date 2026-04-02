@@ -1,5 +1,8 @@
-//! shadowforge — quantum-resistant steganography toolkit
+//! shadowforge — quantum-resistant steganography toolkit.
 
 fn main() {
-    // TODO(T34): wire up CLI entrypoint
+    if let Err(e) = shadowforge_lib::interface::runner::run() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
 }

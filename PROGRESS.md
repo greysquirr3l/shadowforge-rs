@@ -193,7 +193,7 @@
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| T34 — Full clap CLI: Go surface + all nation-state countermeasure commands | `[ ]` | |
+| T34 — Full clap CLI: Go surface + all nation-state countermeasure commands | `[x]` | 252 tests passing, clippy clean |
 
 ---
 
