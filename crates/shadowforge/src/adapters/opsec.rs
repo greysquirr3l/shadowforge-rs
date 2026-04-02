@@ -1,8 +1,8 @@
 //! Operational security adapters implementing emergency wipe and amnesiac operations.
 
 use crate::domain::errors::OpsecError;
-use crate::domain::ports::{AmnesiaPipeline, EmbedTechnique, PanicWiper};
-use crate::domain::types::PanicWipeConfig;
+use crate::domain::ports::{AmnesiaPipeline, EmbedTechnique, GeographicDistributor, PanicWiper};
+use crate::domain::types::{CoverMedia, GeographicManifest, PanicWipeConfig, Payload};
 use rand::Rng;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -235,6 +235,77 @@ impl AmnesiaPipeline for AmnesiaPipelineImpl {
     }
 }
 
+/// Geographic threshold distribution adapter.
+///
+/// Validates the manifest, then embeds payload shards into covers
+/// annotated with jurisdictional metadata.
+pub struct GeographicDistributorImpl;
+
+impl GeographicDistributorImpl {
+    /// Create a new geographic distributor adapter.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for GeographicDistributorImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GeographicDistributor for GeographicDistributorImpl {
+    fn distribute_with_manifest(
+        &self,
+        payload: &Payload,
+        covers: Vec<CoverMedia>,
+        manifest: &GeographicManifest,
+        embedder: &dyn EmbedTechnique,
+    ) -> Result<Vec<CoverMedia>, OpsecError> {
+        // Validate manifest first
+        crate::domain::opsec::validate_manifest(manifest)?;
+
+        if covers.len() < manifest.shards.len() {
+            return Err(OpsecError::ManifestError {
+                reason: format!(
+                    "not enough covers ({}) for manifest entries ({})",
+                    covers.len(),
+                    manifest.shards.len()
+                ),
+            });
+        }
+
+        // For each shard entry, embed payload into the corresponding cover
+        let payload_bytes = payload.as_bytes();
+        let shard_count = manifest.shards.len();
+
+        // Simple equal-size distribution: split payload into N chunks
+        let chunk_size = payload_bytes.len().div_ceil(shard_count);
+        let mut results = Vec::with_capacity(shard_count);
+
+        for (i, cover) in covers.into_iter().enumerate().take(shard_count) {
+            let start = i * chunk_size;
+            let end = (start + chunk_size).min(payload_bytes.len());
+            let chunk = if start < payload_bytes.len() {
+                &payload_bytes[start..end]
+            } else {
+                &[]
+            };
+
+            let shard_payload = Payload::from_bytes(chunk.to_vec());
+            let stego = embedder.embed(cover, &shard_payload).map_err(|e| {
+                OpsecError::ManifestError {
+                    reason: format!("embed failed for shard {i}: {e}"),
+                }
+            })?;
+            results.push(stego);
+        }
+
+        Ok(results)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,5 +531,102 @@ mod tests {
             .expect("embed via default adapter");
 
         assert!(!output.is_empty());
+    }
+
+    // ─── GeographicDistributor Tests ──────────────────────────────────────
+
+    use crate::domain::types::{GeoShardEntry, GeographicManifest, CoverMediaKind};
+
+    fn test_covers(n: usize) -> Vec<CoverMedia> {
+        (0..n)
+            .map(|i| CoverMedia {
+                kind: CoverMediaKind::PngImage,
+                data: Bytes::from(vec![0u8; 64]),
+                metadata: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert("idx".into(), i.to_string());
+                    m
+                },
+            })
+            .collect()
+    }
+
+    fn test_geo_manifest() -> GeographicManifest {
+        GeographicManifest {
+            shards: vec![
+                GeoShardEntry {
+                    shard_index: 0,
+                    jurisdiction: "IS".into(),
+                    holder_description: "Iceland contact".into(),
+                },
+                GeoShardEntry {
+                    shard_index: 1,
+                    jurisdiction: "CH".into(),
+                    holder_description: "Swiss contact".into(),
+                },
+                GeoShardEntry {
+                    shard_index: 2,
+                    jurisdiction: "SG".into(),
+                    holder_description: "Singapore contact".into(),
+                },
+            ],
+            minimum_jurisdictions: 2,
+        }
+    }
+
+    #[test]
+    fn geographic_distribute_succeeds() {
+        let distributor = GeographicDistributorImpl::new();
+        let payload = Payload::from_bytes(b"secret payload data here!".to_vec());
+        let covers = test_covers(3);
+        let manifest = test_geo_manifest();
+
+        let results = distributor
+            .distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)
+            .expect("distribute should succeed");
+
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn geographic_distribute_fails_insufficient_covers() {
+        let distributor = GeographicDistributorImpl::new();
+        let payload = Payload::from_bytes(b"secret".to_vec());
+        let covers = test_covers(1); // Only 1 cover for 3 shards
+        let manifest = test_geo_manifest();
+
+        let result = distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn geographic_distribute_fails_invalid_manifest() {
+        let distributor = GeographicDistributorImpl::new();
+        let payload = Payload::from_bytes(b"secret".to_vec());
+        let covers = test_covers(1);
+        let manifest = GeographicManifest {
+            shards: vec![GeoShardEntry {
+                shard_index: 0,
+                jurisdiction: "IS".into(),
+                holder_description: "one".into(),
+            }],
+            minimum_jurisdictions: 3, // Needs 3 but only has 1
+        };
+
+        let result = distributor.distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn geographic_distributor_default() {
+        let distributor = GeographicDistributorImpl::default();
+        let payload = Payload::from_bytes(b"data".to_vec());
+        let covers = test_covers(3);
+        let manifest = test_geo_manifest();
+
+        let results = distributor
+            .distribute_with_manifest(&payload, covers, &manifest, &MockEmbedder)
+            .expect("default should work");
+        assert_eq!(results.len(), 3);
     }
 }
