@@ -5,6 +5,7 @@ pub mod corpus;
 pub mod correction;
 pub mod crypto;
 pub mod deadrop;
+pub mod distribution;
 pub mod media;
 
 #[cfg(feature = "pdf")]
