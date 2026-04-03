@@ -35,12 +35,6 @@ jobs:
             pdfium_asset: pdfium-linux-arm64.tgz
             cross: true
 
-          # macOS Intel
-          - target: x86_64-apple-darwin
-            runner: macos-13        # Intel runner; Tier 2 target as of Rust 1.90
-            archive_ext: tar.gz
-            pdfium_asset: pdfium-mac-x64.tgz
-
           # macOS Apple Silicon
           - target: aarch64-apple-darwin
             runner: macos-latest    # M-series runner
@@ -52,12 +46,6 @@ jobs:
             runner: windows-latest
             archive_ext: zip
             pdfium_asset: pdfium-win-x64.tgz
-
-          # Windows ARM64 — Tier 1 as of Rust 1.91
-          - target: aarch64-pc-windows-msvc
-            runner: windows-latest
-            archive_ext: zip
-            pdfium_asset: pdfium-win-arm64.tgz
 
     steps:
       - uses: actions/checkout@v4
