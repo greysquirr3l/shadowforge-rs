@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [main]   # dry-run: build only, no upload
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: shadowforge
@@ -90,6 +93,31 @@ jobs:
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} --all-features
 
+      - name: Generate shell completions (native)
+        if: "!matrix.cross"
+        shell: bash
+        run: |
+          BIN="target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}"
+          if [[ "${{ matrix.archive_ext }}" == "zip" ]]; then
+            BIN="${BIN}.exe"
+          fi
+          mkdir -p completions
+          "$BIN" completions bash   -o completions/shadowforge.bash
+          "$BIN" completions zsh    -o completions/_shadowforge
+          "$BIN" completions fish   -o completions/shadowforge.fish
+          "$BIN" completions powershell -o completions/_shadowforge.ps1
+
+      - name: Generate shell completions (cross)
+        if: matrix.cross
+        shell: bash
+        run: |
+          # Cross-compiled binary can't run on host; generate via cargo run on host
+          mkdir -p completions
+          cargo run --release -- completions bash   -o completions/shadowforge.bash
+          cargo run --release -- completions zsh    -o completions/_shadowforge
+          cargo run --release -- completions fish   -o completions/shadowforge.fish
+          cargo run --release -- completions powershell -o completions/_shadowforge.ps1
+
       - name: Package (Unix)
         if: matrix.archive_ext == 'tar.gz'
         shell: bash
@@ -109,7 +137,7 @@ jobs:
           $VERSION = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
           $ARCHIVE = "${{ env.BINARY_NAME }}_${VERSION}_${{ matrix.target }}.zip"
           Copy-Item $BIN .
-          Compress-Archive -Path "${{ env.BINARY_NAME }}.exe","README.md","LICENSE" -DestinationPath $ARCHIVE
+          Compress-Archive -Path "${{ env.BINARY_NAME }}.exe","completions","README.md","LICENSE" -DestinationPath $ARCHIVE
           echo "ASSET=$ARCHIVE" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload to GitHub Release
