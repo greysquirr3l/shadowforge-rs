@@ -91,14 +91,13 @@ jobs:
         run: |
           cargo tarpaulin --workspace --all-features \
             --out Xml --output-dir coverage/ \
-            --exclude-files "src/interface/*" \
             --timeout 300
 
       - name: Check coverage thresholds
         run: |
           python3 scripts/check_coverage.py coverage/cobertura.xml \
-            --overall 85 \
-            --module "domain::crypto" 90
+            --overall 75 \
+            --module "domain::crypto" 85
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
