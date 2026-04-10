@@ -12,7 +12,9 @@ use crate::application::services::{
     AnalyseService, AppError, ArchiveService, EmbedService, ExtractService, KeyGenService,
     ScrubService,
 };
-use crate::domain::types::{CoverMedia, CoverMediaKind, Payload};
+use crate::domain::errors::{CanaryError, StegoError};
+use crate::domain::ports::{EmbedTechnique, ExtractTechnique, MediaLoader};
+use crate::domain::types::{CoverMedia, CoverMediaKind, Payload, StegoTechnique};
 
 use super::cli::{self, Cli, Commands};
 
@@ -121,8 +123,7 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
                 reason: "--cover is required for deniable embedding".into(),
             }
         })?;
-        let cover_bytes = fs_read(cover_path)?;
-        let cover = load_cover(technique, &cover_bytes);
+        let cover = load_cover_from_path(cover_path, technique)?;
 
         let decoy_path = args.decoy_payload.as_ref().ok_or_else(|| {
             crate::domain::errors::DeniableError::EmbedFailed {
@@ -154,18 +155,29 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             embedder.as_ref(),
             &deniable,
         )?;
-        fs_write(&args.output, stego.data.as_ref())?;
+        save_cover_to_path(&stego, &args.output)?;
         eprintln!("Deniable embedding complete");
     } else {
+        // Note: profile and platform only apply to distributed embedding.
+        // Single-cover embedding uses the technique directly without profile constraints.
+        if matches!(args.profile, cli::Profile::Standard) {
+            // Standard profile: silent
+        } else {
+            eprintln!(
+                "Note: --profile {:?} only applies to distributed embedding; \
+                 single-cover uses technique directly",
+                args.profile
+            );
+        }
+
         let cover_path = args.cover.as_ref().ok_or_else(|| {
             crate::domain::errors::StegoError::MalformedCoverData {
                 reason: "--cover is required when not using --amnesia".into(),
             }
         })?;
-        let cover_bytes = fs_read(cover_path)?;
-        let cover = load_cover(technique, &cover_bytes);
+        let cover = load_cover_from_path(cover_path, technique)?;
         let stego = EmbedService::embed(cover, &payload, embedder.as_ref())?;
-        fs_write(&args.output, stego.data.as_ref())?;
+        save_cover_to_path(&stego, &args.output)?;
         eprintln!("Embedded {} bytes", payload.len());
     }
     Ok(())
@@ -176,6 +188,10 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
 fn cmd_extract(args: &cli::ExtractArgs) -> Result<(), AppError> {
     let technique = resolve_technique(args.technique);
     let extractor = build_extractor(technique);
+    let deniable_key = match &args.key {
+        Some(path) => Some(fs_read(path)?),
+        None => None,
+    };
 
     if args.amnesia {
         let mut buf = Vec::new();
@@ -187,16 +203,35 @@ fn cmd_extract(args: &cli::ExtractArgs) -> Result<(), AppError> {
                 reason: format!("stdin read: {e}"),
             })?;
         let cover = load_cover(technique, &buf);
-        let payload = ExtractService::extract(&cover, extractor.as_ref())?;
+        let payload = if let Some(key) = deniable_key.as_deref() {
+            let deniable = crate::adapters::stego::DualPayloadEmbedder;
+            crate::application::services::DeniableEmbedService::extract_with_key(
+                &cover,
+                key,
+                extractor.as_ref(),
+                &deniable,
+            )?
+        } else {
+            ExtractService::extract(&cover, extractor.as_ref())?
+        };
         io::stdout().write_all(payload.as_bytes()).map_err(|e| {
             crate::domain::errors::StegoError::MalformedCoverData {
                 reason: format!("stdout write: {e}"),
             }
         })?;
     } else {
-        let stego_bytes = fs_read(&args.input)?;
-        let stego = load_cover(technique, &stego_bytes);
-        let payload = ExtractService::extract(&stego, extractor.as_ref())?;
+        let stego = load_cover_from_path(&args.input, technique)?;
+        let payload = if let Some(key) = deniable_key.as_deref() {
+            let deniable = crate::adapters::stego::DualPayloadEmbedder;
+            crate::application::services::DeniableEmbedService::extract_with_key(
+                &stego,
+                key,
+                extractor.as_ref(),
+                &deniable,
+            )?
+        } else {
+            ExtractService::extract(&stego, extractor.as_ref())?
+        };
         fs_write(&args.output, payload.as_bytes())?;
         eprintln!("Extracted {} bytes", payload.len());
     }
@@ -215,10 +250,7 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     let cover_paths = collect_cover_paths(&args.covers)?;
     let covers: Result<Vec<CoverMedia>, AppError> = cover_paths
         .iter()
-        .map(|p| {
-            let data = fs_read(p)?;
-            Ok(load_cover(technique, &data))
-        })
+        .map(|path| load_cover_from_path(path, technique))
         .collect();
     let covers = covers?;
 
@@ -229,7 +261,7 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     };
     let distributor = crate::adapters::distribution::DistributorImpl::new(hmac_key.clone());
 
-    let stego_covers = crate::application::services::DistributeService::distribute(
+    let mut stego_covers = crate::application::services::DistributeService::distribute(
         &payload,
         covers,
         &profile,
@@ -237,11 +269,31 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
         embedder.as_ref(),
     )?;
 
+    // Embed canary shard if requested
+    let canary_metadata = if args.canary {
+        let canary_impl = crate::adapters::canary::CanaryServiceImpl::new(64, 5);
+        let (covers_with_canary, shard) =
+            crate::application::services::CanaryShardService::embed_canary(
+                stego_covers,
+                embedder.as_ref(),
+                &canary_impl,
+            )?;
+        stego_covers = covers_with_canary;
+        Some(shard)
+    } else {
+        None
+    };
+
     let files: Vec<(String, Vec<u8>)> = stego_covers
         .iter()
         .enumerate()
-        .map(|(i, c)| (format!("shard_{i:04}.png"), c.data.to_vec()))
-        .collect();
+        .map(|(i, cover)| {
+            Ok((
+                format!("shard_{i:04}.{}", cover_file_extension(cover.kind)),
+                serialise_cover_to_bytes(cover)?,
+            ))
+        })
+        .collect::<Result<_, AppError>>()?;
     let file_refs: Vec<(&str, &[u8])> = files
         .iter()
         .map(|(n, d)| (n.as_str(), d.as_slice()))
@@ -253,12 +305,27 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
         &handler,
     )?;
     fs_write(&args.output_archive, &archive)?;
+
     // Persist HMAC key so extract-distributed can use it
     if args.hmac_key.is_none() {
         let key_path = args.output_archive.with_extension("hmac");
         fs_write(&key_path, &hmac_key)?;
         eprintln!("HMAC key written to {}", key_path.display());
     }
+
+    // Persist canary metadata if embedded
+    if let Some(canary_shard) = canary_metadata {
+        let canary_path = args.output_archive.with_extension("canary");
+        let canary_json = serde_json::to_string_pretty(&canary_shard).map_err(|e| {
+            let stego_err = StegoError::MalformedCoverData {
+                reason: format!("Failed to serialize canary metadata: {e}"),
+            };
+            AppError::Canary(CanaryError::EmbedFailed { source: stego_err })
+        })?;
+        fs_write(&canary_path, canary_json.as_bytes())?;
+        eprintln!("Canary metadata written to {}", canary_path.display());
+    }
+
     eprintln!(
         "Distributed into {} shards → {}",
         stego_covers.len(),
@@ -283,8 +350,8 @@ fn cmd_extract_distributed(args: &cli::ExtractDistributedArgs) -> Result<(), App
 
     let covers: Vec<CoverMedia> = entries
         .iter()
-        .map(|(_, data)| load_cover(technique, data))
-        .collect();
+        .map(|(name, data)| load_cover_from_named_bytes(name, technique, data))
+        .collect::<Result<_, AppError>>()?;
 
     let hmac_key = if let Some(p) = &args.hmac_key {
         fs_read(p)?
@@ -314,8 +381,7 @@ fn cmd_extract_distributed(args: &cli::ExtractDistributedArgs) -> Result<(), App
 
 fn cmd_analyse(args: &cli::AnalyseArgs) -> Result<(), AppError> {
     let technique = resolve_technique(args.technique);
-    let cover_bytes = fs_read(&args.cover)?;
-    let cover = load_cover(technique, &cover_bytes);
+    let cover = load_cover_from_path(&args.cover, technique)?;
     let analyser = crate::adapters::analysis::CapacityAnalyserImpl::new();
     let report = AnalyseService::analyse(&cover, technique, &analyser)?;
 
@@ -422,8 +488,7 @@ fn cmd_scrub(args: &cli::ScrubArgs) -> Result<(), AppError> {
 fn cmd_dead_drop(args: &cli::DeadDropArgs) -> Result<(), AppError> {
     let technique = resolve_technique(args.technique);
     let embedder = build_embedder(technique);
-    let cover_bytes = fs_read(&args.cover)?;
-    let cover = load_cover(technique, &cover_bytes);
+    let cover = load_cover_from_path(&args.cover, technique)?;
     let payload_bytes = fs_read(&args.input)?;
     let payload = Payload::from_bytes(payload_bytes);
     let platform = resolve_platform(args.platform);
@@ -435,7 +500,7 @@ fn cmd_dead_drop(args: &cli::DeadDropArgs) -> Result<(), AppError> {
         embedder.as_ref(),
         &encoder,
     )?;
-    fs_write(&args.output, stego.data.as_ref())?;
+    save_cover_to_path(&stego, &args.output)?;
     eprintln!("Dead drop encoded for {platform:?}");
     Ok(())
 }
@@ -513,9 +578,8 @@ fn cmd_watermark(args: &cli::WatermarkArgs) -> Result<(), AppError> {
             output,
             recipient_id,
         } => {
-            let cover_bytes = fs_read(cover)?;
             let cover_media =
-                load_cover(crate::domain::types::StegoTechnique::LsbImage, &cover_bytes);
+                load_cover_from_path(cover, crate::domain::types::StegoTechnique::LsbImage)?;
             let watermarker = crate::adapters::opsec::ForensicWatermarkerImpl::new();
             let rid = uuid::Uuid::parse_str(recipient_id).map_err(|e| {
                 crate::domain::errors::OpsecError::WatermarkError {
@@ -531,13 +595,12 @@ fn cmd_watermark(args: &cli::WatermarkArgs) -> Result<(), AppError> {
                 &tag,
                 &watermarker,
             )?;
-            fs_write(output, stego.data.as_ref())?;
+            save_cover_to_path(&stego, output)?;
             eprintln!("Tripwire embedded for {recipient_id}");
         }
         cli::WatermarkSubcommand::Identify { cover, tags } => {
-            let cover_bytes = fs_read(cover)?;
             let cover_media =
-                load_cover(crate::domain::types::StegoTechnique::LsbImage, &cover_bytes);
+                load_cover_from_path(cover, crate::domain::types::StegoTechnique::LsbImage)?;
             let watermarker = crate::adapters::opsec::ForensicWatermarkerImpl::new();
             let tag_list = load_watermark_tags(tags)?;
             let receipt = crate::application::services::ForensicService::identify_recipient(
@@ -649,6 +712,192 @@ fn fs_create_dir_all(path: &Path) -> Result<(), AppError> {
     })
 }
 
+fn map_media_error(error: crate::domain::errors::MediaError) -> AppError {
+    match error {
+        crate::domain::errors::MediaError::UnsupportedFormat { extension } => {
+            AppError::Stego(crate::domain::errors::StegoError::UnsupportedCoverType {
+                reason: format!("unsupported cover format: {extension}"),
+            })
+        }
+        crate::domain::errors::MediaError::DecodeFailed { reason }
+        | crate::domain::errors::MediaError::EncodeFailed { reason }
+        | crate::domain::errors::MediaError::IoError { reason } => {
+            AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData { reason })
+        }
+    }
+}
+
+#[cfg(feature = "pdf")]
+fn map_pdf_runner_error(error: crate::domain::errors::PdfError) -> AppError {
+    match error {
+        crate::domain::errors::PdfError::Encrypted => {
+            AppError::Stego(crate::domain::errors::StegoError::UnsupportedCoverType {
+                reason: "encrypted PDF documents are not supported".to_string(),
+            })
+        }
+        crate::domain::errors::PdfError::ParseFailed { reason }
+        | crate::domain::errors::PdfError::RenderFailed { reason, .. }
+        | crate::domain::errors::PdfError::RebuildFailed { reason }
+        | crate::domain::errors::PdfError::EmbedFailed { reason }
+        | crate::domain::errors::PdfError::ExtractFailed { reason }
+        | crate::domain::errors::PdfError::IoError { reason } => {
+            AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData { reason })
+        }
+    }
+}
+
+fn load_cover_from_path(path: &Path, technique: StegoTechnique) -> Result<CoverMedia, AppError> {
+    match technique {
+        StegoTechnique::LsbAudio | StegoTechnique::PhaseEncoding | StegoTechnique::EchoHiding => {
+            let loader = crate::adapters::media::AudioMediaLoader;
+            loader.load(path).map_err(map_media_error)
+        }
+        StegoTechnique::PdfContentStream | StegoTechnique::PdfMetadata => load_pdf_cover(path),
+        StegoTechnique::ZeroWidthText => {
+            let data = fs_read(path)?;
+            Ok(load_cover(technique, &data))
+        }
+        StegoTechnique::LsbImage
+        | StegoTechnique::DctJpeg
+        | StegoTechnique::Palette
+        | StegoTechnique::CorpusSelection
+        | StegoTechnique::DualPayload => {
+            let loader = crate::adapters::media::ImageMediaLoader;
+            loader.load(path).map_err(map_media_error)
+        }
+    }
+}
+
+#[cfg(feature = "pdf")]
+fn load_pdf_cover(path: &Path) -> Result<CoverMedia, AppError> {
+    use crate::domain::ports::PdfProcessor;
+
+    let processor = crate::adapters::pdf::PdfProcessorImpl::default();
+    processor.load_pdf(path).map_err(map_pdf_runner_error)
+}
+
+#[cfg(not(feature = "pdf"))]
+fn load_pdf_cover(_path: &Path) -> Result<CoverMedia, AppError> {
+    Err(AppError::Stego(
+        crate::domain::errors::StegoError::UnsupportedCoverType {
+            reason: "PDF support is not enabled in this build".to_string(),
+        },
+    ))
+}
+
+fn save_cover_to_path(media: &CoverMedia, path: &Path) -> Result<(), AppError> {
+    if let Some(parent) = path.parent() {
+        fs_create_dir_all(parent)?;
+    }
+
+    match media.kind {
+        CoverMediaKind::PngImage
+        | CoverMediaKind::BmpImage
+        | CoverMediaKind::JpegImage
+        | CoverMediaKind::GifImage => {
+            let loader = crate::adapters::media::ImageMediaLoader;
+            loader.save(media, path).map_err(map_media_error)
+        }
+        CoverMediaKind::WavAudio => {
+            let loader = crate::adapters::media::AudioMediaLoader;
+            loader.save(media, path).map_err(map_media_error)
+        }
+        CoverMediaKind::PdfDocument => save_pdf_cover(media, path),
+        CoverMediaKind::PlainText => fs_write(path, media.data.as_ref()),
+    }
+}
+
+#[cfg(feature = "pdf")]
+fn save_pdf_cover(media: &CoverMedia, path: &Path) -> Result<(), AppError> {
+    use crate::domain::ports::PdfProcessor;
+
+    let processor = crate::adapters::pdf::PdfProcessorImpl::default();
+    processor
+        .save_pdf(media, path)
+        .map_err(map_pdf_runner_error)
+}
+
+#[cfg(not(feature = "pdf"))]
+fn save_pdf_cover(_media: &CoverMedia, _path: &Path) -> Result<(), AppError> {
+    Err(AppError::Stego(
+        crate::domain::errors::StegoError::UnsupportedCoverType {
+            reason: "PDF support is not enabled in this build".to_string(),
+        },
+    ))
+}
+
+fn serialise_cover_to_bytes(media: &CoverMedia) -> Result<Vec<u8>, AppError> {
+    match media.kind {
+        CoverMediaKind::PdfDocument | CoverMediaKind::PlainText => Ok(media.data.to_vec()),
+        _ => {
+            let temp_path = std::env::temp_dir().join(format!(
+                "shadowforge-{}.{}",
+                uuid::Uuid::new_v4(),
+                cover_file_extension(media.kind)
+            ));
+            let result = (|| {
+                save_cover_to_path(media, &temp_path)?;
+                fs_read(&temp_path)
+            })();
+            let _ = std::fs::remove_file(&temp_path);
+            result
+        }
+    }
+}
+
+fn load_cover_from_named_bytes(
+    name: &str,
+    technique: StegoTechnique,
+    data: &[u8],
+) -> Result<CoverMedia, AppError> {
+    if technique == StegoTechnique::ZeroWidthText {
+        return Ok(load_cover(technique, data));
+    }
+
+    let extension = Path::new(name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_else(|| technique_file_extension(technique));
+    let temp_path = std::env::temp_dir().join(format!(
+        "shadowforge-{}.{}",
+        uuid::Uuid::new_v4(),
+        extension
+    ));
+    let result = (|| {
+        fs_write(&temp_path, data)?;
+        load_cover_from_path(&temp_path, technique)
+    })();
+    let _ = std::fs::remove_file(&temp_path);
+    result
+}
+
+const fn cover_file_extension(kind: CoverMediaKind) -> &'static str {
+    match kind {
+        CoverMediaKind::PngImage => "png",
+        CoverMediaKind::BmpImage => "bmp",
+        CoverMediaKind::JpegImage => "jpg",
+        CoverMediaKind::GifImage => "gif",
+        CoverMediaKind::WavAudio => "wav",
+        CoverMediaKind::PdfDocument => "pdf",
+        CoverMediaKind::PlainText => "txt",
+    }
+}
+
+const fn technique_file_extension(technique: StegoTechnique) -> &'static str {
+    match technique {
+        StegoTechnique::LsbAudio | StegoTechnique::PhaseEncoding | StegoTechnique::EchoHiding => {
+            "wav"
+        }
+        StegoTechnique::PdfContentStream | StegoTechnique::PdfMetadata => "pdf",
+        StegoTechnique::ZeroWidthText => "txt",
+        StegoTechnique::DctJpeg => "jpg",
+        StegoTechnique::LsbImage
+        | StegoTechnique::Palette
+        | StegoTechnique::CorpusSelection
+        | StegoTechnique::DualPayload => "png",
+    }
+}
+
 fn load_cover(technique: crate::domain::types::StegoTechnique, data: &[u8]) -> CoverMedia {
     let kind = match technique {
         crate::domain::types::StegoTechnique::LsbAudio
@@ -657,8 +906,8 @@ fn load_cover(technique: crate::domain::types::StegoTechnique, data: &[u8]) -> C
         crate::domain::types::StegoTechnique::ZeroWidthText => CoverMediaKind::PlainText,
         crate::domain::types::StegoTechnique::PdfContentStream
         | crate::domain::types::StegoTechnique::PdfMetadata => CoverMediaKind::PdfDocument,
+        crate::domain::types::StegoTechnique::DctJpeg => CoverMediaKind::JpegImage,
         crate::domain::types::StegoTechnique::LsbImage
-        | crate::domain::types::StegoTechnique::DctJpeg
         | crate::domain::types::StegoTechnique::Palette
         | crate::domain::types::StegoTechnique::CorpusSelection
         | crate::domain::types::StegoTechnique::DualPayload => CoverMediaKind::PngImage,
@@ -671,9 +920,7 @@ fn load_cover(technique: crate::domain::types::StegoTechnique, data: &[u8]) -> C
 }
 
 /// Build an embedder for the given technique.
-fn build_embedder(
-    technique: crate::domain::types::StegoTechnique,
-) -> Box<dyn crate::domain::ports::EmbedTechnique> {
+fn build_embedder(technique: crate::domain::types::StegoTechnique) -> Box<dyn EmbedTechnique> {
     use crate::domain::types::StegoTechnique;
     match technique {
         StegoTechnique::DctJpeg => Box::new(crate::adapters::stego::DctJpeg),
@@ -682,19 +929,22 @@ fn build_embedder(
         StegoTechnique::PhaseEncoding => Box::new(crate::adapters::stego::PhaseEncoding),
         StegoTechnique::EchoHiding => Box::new(crate::adapters::stego::EchoHiding),
         StegoTechnique::ZeroWidthText => Box::new(crate::adapters::stego::ZeroWidthText),
-        // PDF/Corpus/Dual fall back to LSB — PDF needs PdfProcessor not available here
-        StegoTechnique::LsbImage
-        | StegoTechnique::PdfContentStream
-        | StegoTechnique::PdfMetadata
-        | StegoTechnique::CorpusSelection
-        | StegoTechnique::DualPayload => Box::new(crate::adapters::stego::LsbImage::new()),
+        StegoTechnique::PdfContentStream => build_pdf_content_stream_embedder(),
+        StegoTechnique::PdfMetadata => build_pdf_metadata_embedder(),
+        StegoTechnique::CorpusSelection => Box::new(UnsupportedTechnique::new(
+            StegoTechnique::CorpusSelection,
+            "corpus selection must use the corpus workflow, not generic embed",
+        )),
+        StegoTechnique::DualPayload => Box::new(UnsupportedTechnique::new(
+            StegoTechnique::DualPayload,
+            "dual-payload embedding must use the deniable embed workflow",
+        )),
+        StegoTechnique::LsbImage => Box::new(crate::adapters::stego::LsbImage::new()),
     }
 }
 
 /// Build an extractor for the given technique.
-fn build_extractor(
-    technique: crate::domain::types::StegoTechnique,
-) -> Box<dyn crate::domain::ports::ExtractTechnique> {
+fn build_extractor(technique: crate::domain::types::StegoTechnique) -> Box<dyn ExtractTechnique> {
     use crate::domain::types::StegoTechnique;
     match technique {
         StegoTechnique::DctJpeg => Box::new(crate::adapters::stego::DctJpeg),
@@ -703,11 +953,111 @@ fn build_extractor(
         StegoTechnique::PhaseEncoding => Box::new(crate::adapters::stego::PhaseEncoding),
         StegoTechnique::EchoHiding => Box::new(crate::adapters::stego::EchoHiding),
         StegoTechnique::ZeroWidthText => Box::new(crate::adapters::stego::ZeroWidthText),
-        StegoTechnique::LsbImage
-        | StegoTechnique::PdfContentStream
-        | StegoTechnique::PdfMetadata
-        | StegoTechnique::CorpusSelection
-        | StegoTechnique::DualPayload => Box::new(crate::adapters::stego::LsbImage::new()),
+        StegoTechnique::PdfContentStream => build_pdf_content_stream_extractor(),
+        StegoTechnique::PdfMetadata => build_pdf_metadata_extractor(),
+        StegoTechnique::CorpusSelection => Box::new(UnsupportedTechnique::new(
+            StegoTechnique::CorpusSelection,
+            "corpus selection must use the corpus workflow, not generic extract",
+        )),
+        StegoTechnique::DualPayload => Box::new(UnsupportedTechnique::new(
+            StegoTechnique::DualPayload,
+            "dual-payload extraction must use the deniable extraction workflow",
+        )),
+        StegoTechnique::LsbImage => Box::new(crate::adapters::stego::LsbImage::new()),
+    }
+}
+
+#[cfg(feature = "pdf")]
+fn build_pdf_content_stream_embedder() -> Box<dyn EmbedTechnique> {
+    Box::new(crate::adapters::pdf::PdfContentStreamStego::new())
+}
+
+#[cfg(not(feature = "pdf"))]
+fn build_pdf_content_stream_embedder() -> Box<dyn EmbedTechnique> {
+    Box::new(UnsupportedTechnique::new(
+        crate::domain::types::StegoTechnique::PdfContentStream,
+        "PDF support is not enabled in this build",
+    ))
+}
+
+#[cfg(feature = "pdf")]
+fn build_pdf_metadata_embedder() -> Box<dyn EmbedTechnique> {
+    Box::new(crate::adapters::pdf::PdfMetadataStego::new())
+}
+
+#[cfg(not(feature = "pdf"))]
+fn build_pdf_metadata_embedder() -> Box<dyn EmbedTechnique> {
+    Box::new(UnsupportedTechnique::new(
+        crate::domain::types::StegoTechnique::PdfMetadata,
+        "PDF support is not enabled in this build",
+    ))
+}
+
+#[cfg(feature = "pdf")]
+fn build_pdf_content_stream_extractor() -> Box<dyn ExtractTechnique> {
+    Box::new(crate::adapters::pdf::PdfContentStreamStego::new())
+}
+
+#[cfg(not(feature = "pdf"))]
+fn build_pdf_content_stream_extractor() -> Box<dyn ExtractTechnique> {
+    Box::new(UnsupportedTechnique::new(
+        crate::domain::types::StegoTechnique::PdfContentStream,
+        "PDF support is not enabled in this build",
+    ))
+}
+
+#[cfg(feature = "pdf")]
+fn build_pdf_metadata_extractor() -> Box<dyn ExtractTechnique> {
+    Box::new(crate::adapters::pdf::PdfMetadataStego::new())
+}
+
+#[cfg(not(feature = "pdf"))]
+fn build_pdf_metadata_extractor() -> Box<dyn ExtractTechnique> {
+    Box::new(UnsupportedTechnique::new(
+        crate::domain::types::StegoTechnique::PdfMetadata,
+        "PDF support is not enabled in this build",
+    ))
+}
+
+#[derive(Debug)]
+struct UnsupportedTechnique {
+    technique: crate::domain::types::StegoTechnique,
+    reason: &'static str,
+}
+
+impl UnsupportedTechnique {
+    const fn new(technique: crate::domain::types::StegoTechnique, reason: &'static str) -> Self {
+        Self { technique, reason }
+    }
+}
+
+impl EmbedTechnique for UnsupportedTechnique {
+    fn technique(&self) -> crate::domain::types::StegoTechnique {
+        self.technique
+    }
+
+    fn capacity(&self, _cover: &CoverMedia) -> Result<crate::domain::types::Capacity, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: self.reason.to_string(),
+        })
+    }
+
+    fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: self.reason.to_string(),
+        })
+    }
+}
+
+impl ExtractTechnique for UnsupportedTechnique {
+    fn technique(&self) -> crate::domain::types::StegoTechnique {
+        self.technique
+    }
+
+    fn extract(&self, _stego: &CoverMedia) -> Result<Payload, StegoError> {
+        Err(StegoError::UnsupportedCoverType {
+            reason: self.reason.to_string(),
+        })
     }
 }
 
@@ -827,4 +1177,115 @@ fn load_watermark_tags(
         }
     }
     Ok(tags)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_embedder, build_extractor, cmd_extract, load_cover, load_cover_from_path,
+        save_cover_to_path,
+    };
+    use crate::application::services::DeniableEmbedService;
+    use crate::domain::types::{CoverMediaKind, StegoTechnique};
+    use crate::interface::cli;
+    use image::{DynamicImage, Rgba, RgbaImage};
+    use std::fs;
+    use tempfile::tempdir;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    #[test]
+    fn dct_cover_is_classified_as_jpeg() {
+        let cover = load_cover(StegoTechnique::DctJpeg, b"jpeg");
+        assert_eq!(cover.kind, CoverMediaKind::JpegImage);
+    }
+
+    #[test]
+    fn pdf_cover_is_classified_as_pdf() {
+        let cover = load_cover(StegoTechnique::PdfContentStream, b"%PDF-1.7");
+        assert_eq!(cover.kind, CoverMediaKind::PdfDocument);
+    }
+
+    #[test]
+    fn pdf_content_stream_embedder_uses_pdf_technique() {
+        let embedder = build_embedder(StegoTechnique::PdfContentStream);
+        assert_eq!(embedder.technique(), StegoTechnique::PdfContentStream);
+    }
+
+    #[test]
+    fn pdf_metadata_extractor_uses_pdf_technique() {
+        let extractor = build_extractor(StegoTechnique::PdfMetadata);
+        assert_eq!(extractor.technique(), StegoTechnique::PdfMetadata);
+    }
+
+    #[test]
+    fn corpus_embedder_is_not_rewritten_as_lsb_image() {
+        let embedder = build_embedder(StegoTechnique::CorpusSelection);
+        assert_eq!(embedder.technique(), StegoTechnique::CorpusSelection);
+    }
+
+    #[test]
+    fn file_backed_image_covers_use_media_loader() -> TestResult {
+        let dir = tempdir()?;
+        let input_path = dir.path().join("cover.png");
+        let output_path = dir.path().join("roundtrip.png");
+
+        let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(3, 2, Rgba([1, 2, 3, 255])));
+        image.save(&input_path)?;
+
+        let cover = load_cover_from_path(&input_path, StegoTechnique::LsbImage)?;
+        assert_eq!(cover.kind, CoverMediaKind::PngImage);
+        assert_eq!(cover.metadata.get("width"), Some(&"3".to_string()));
+        assert_eq!(cover.metadata.get("height"), Some(&"2".to_string()));
+
+        save_cover_to_path(&cover, &output_path)?;
+        let written = fs::read(output_path)?;
+        assert!(!written.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn extract_uses_deniable_key_path_when_provided() -> TestResult {
+        let dir = tempdir()?;
+        let cover_path = dir.path().join("cover.png");
+        let input_path = dir.path().join("input.png");
+        let output_path = dir.path().join("output.bin");
+        let key_path = dir.path().join("primary.key");
+
+        let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(40, 40, Rgba([0, 0, 0, 255])));
+        image.save(&cover_path)?;
+
+        let primary_key = vec![7u8; 32];
+        let decoy_key = vec![9u8; 32];
+        let pair = crate::domain::types::DeniablePayloadPair {
+            real_payload: b"real secret".to_vec(),
+            decoy_payload: b"decoy".to_vec(),
+        };
+        let keys = crate::domain::types::DeniableKeySet {
+            primary_key: primary_key.clone(),
+            decoy_key,
+        };
+        let cover = load_cover_from_path(&cover_path, StegoTechnique::LsbImage)?;
+        let deniable = crate::adapters::stego::DualPayloadEmbedder;
+        let embedder = build_embedder(StegoTechnique::LsbImage);
+        let stego =
+            DeniableEmbedService::embed_dual(cover, &pair, &keys, embedder.as_ref(), &deniable)?;
+
+        save_cover_to_path(&stego, &input_path)?;
+        fs::write(&key_path, &primary_key)?;
+
+        let args = cli::ExtractArgs {
+            input: input_path,
+            output: output_path.clone(),
+            technique: cli::Technique::Lsb,
+            key: Some(key_path),
+            amnesia: false,
+        };
+
+        cmd_extract(&args)?;
+
+        let extracted = fs::read(output_path)?;
+        assert_eq!(extracted, b"real secret");
+        Ok(())
+    }
 }
