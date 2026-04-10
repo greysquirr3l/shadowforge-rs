@@ -11,9 +11,10 @@ use image::{DynamicImage, ImageFormat};
 use lopdf::{Document, Object, dictionary};
 use pdfium_render::prelude::*;
 
-use crate::domain::errors::PdfError;
-use crate::domain::ports::PdfProcessor;
-use crate::domain::types::{CoverMedia, CoverMediaKind, Payload};
+use crate::domain::analysis::estimate_capacity;
+use crate::domain::errors::{PdfError, StegoError};
+use crate::domain::ports::{EmbedTechnique, ExtractTechnique, PdfProcessor};
+use crate::domain::types::{Capacity, CoverMedia, CoverMediaKind, Payload, StegoTechnique};
 
 // Metadata keys
 const KEY_PAGE_COUNT: &str = "page_count";
@@ -568,6 +569,125 @@ impl PdfProcessor for PdfProcessorImpl {
             })?;
 
         Ok(Payload::from_bytes(decoded))
+    }
+}
+
+fn ensure_pdf_cover(cover: &CoverMedia, technique: StegoTechnique) -> Result<Capacity, StegoError> {
+    if cover.kind != CoverMediaKind::PdfDocument {
+        return Err(StegoError::UnsupportedCoverType {
+            reason: format!("{technique:?} requires a PDF cover"),
+        });
+    }
+
+    Ok(Capacity {
+        bytes: estimate_capacity(cover, technique),
+        technique,
+    })
+}
+
+fn map_pdf_error(error: PdfError) -> StegoError {
+    match error {
+        PdfError::Encrypted => StegoError::UnsupportedCoverType {
+            reason: "encrypted PDF documents are not supported".to_string(),
+        },
+        PdfError::ExtractFailed { .. } => StegoError::NoPayloadFound,
+        PdfError::RenderFailed { page, reason } => StegoError::MalformedCoverData {
+            reason: format!("pdf render failed on page {page}: {reason}"),
+        },
+        PdfError::ParseFailed { reason }
+        | PdfError::RebuildFailed { reason }
+        | PdfError::EmbedFailed { reason }
+        | PdfError::IoError { reason } => StegoError::MalformedCoverData {
+            reason: format!("pdf processing failed: {reason}"),
+        },
+    }
+}
+
+/// Stego adapter that embeds payloads in PDF content streams.
+#[derive(Debug, Default)]
+pub struct PdfContentStreamStego {
+    processor: PdfProcessorImpl,
+}
+
+impl PdfContentStreamStego {
+    /// Create a content-stream PDF stego adapter with default processor settings.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl EmbedTechnique for PdfContentStreamStego {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::PdfContentStream
+    }
+
+    fn capacity(&self, cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        ensure_pdf_cover(cover, <Self as EmbedTechnique>::technique(self))
+    }
+
+    fn embed(&self, cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
+        ensure_pdf_cover(&cover, <Self as EmbedTechnique>::technique(self))?;
+        self.processor
+            .embed_in_content_stream(cover, payload)
+            .map_err(map_pdf_error)
+    }
+}
+
+impl ExtractTechnique for PdfContentStreamStego {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::PdfContentStream
+    }
+
+    fn extract(&self, stego: &CoverMedia) -> Result<Payload, StegoError> {
+        ensure_pdf_cover(stego, <Self as ExtractTechnique>::technique(self))?;
+        self.processor
+            .extract_from_content_stream(stego)
+            .map_err(map_pdf_error)
+    }
+}
+
+/// Stego adapter that embeds payloads in PDF metadata fields.
+#[derive(Debug, Default)]
+pub struct PdfMetadataStego {
+    processor: PdfProcessorImpl,
+}
+
+impl PdfMetadataStego {
+    /// Create a metadata PDF stego adapter with default processor settings.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl EmbedTechnique for PdfMetadataStego {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::PdfMetadata
+    }
+
+    fn capacity(&self, cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        ensure_pdf_cover(cover, <Self as EmbedTechnique>::technique(self))
+    }
+
+    fn embed(&self, cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
+        ensure_pdf_cover(&cover, <Self as EmbedTechnique>::technique(self))?;
+        self.processor
+            .embed_in_metadata(cover, payload)
+            .map_err(map_pdf_error)
+    }
+}
+
+impl ExtractTechnique for PdfMetadataStego {
+    fn technique(&self) -> StegoTechnique {
+        StegoTechnique::PdfMetadata
+    }
+
+    fn extract(&self, stego: &CoverMedia) -> Result<Payload, StegoError> {
+        ensure_pdf_cover(stego, <Self as ExtractTechnique>::technique(self))?;
+        self.processor
+            .extract_from_metadata(stego)
+            .map_err(map_pdf_error)
     }
 }
 
