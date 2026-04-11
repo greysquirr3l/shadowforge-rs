@@ -2278,6 +2278,7 @@ dependencies = [
  "clap_complete",
  "criterion",
  "flate2",
+ "glob",
  "hex",
  "hmac",
  "hound",

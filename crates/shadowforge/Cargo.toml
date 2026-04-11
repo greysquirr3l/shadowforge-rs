@@ -106,6 +106,7 @@ ureq = "3"
 # ─── Collections / Utilities ──────────────────────────────────────────────────
 indexmap = { version = "2", features = ["serde"] }
 hex      = "0.4"
+glob     = "0.3"
 
 # ─── Dev / Test ───────────────────────────────────────────────────────────────
 [dev-dependencies]

@@ -47,6 +47,23 @@ jobs:
             archive_ext: zip
             pdfium_asset: pdfium-win-x64.tgz
 
+          # macOS Intel  — Tier 2 as of Rust 1.90 (Apple Silicon transition);
+          # retained for legacy compatibility. Uses macos-13, the last
+          # Intel-based GitHub Actions runner (macos-latest is now ARM).
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            archive_ext: tar.gz
+            pdfium_asset: pdfium-mac-x64.tgz
+
+          # Windows ARM64 — Tier 1 as of Rust 1.91.
+          # Uses the native windows-11-arm runner to avoid needing the MSVC
+          # ARM64 cross-compiler component which is not present on the
+          # standard windows-latest (x86_64) runner.
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            archive_ext: zip
+            pdfium_asset: pdfium-win-arm64.tgz
+
     steps:
       - uses: actions/checkout@v4
         with:
