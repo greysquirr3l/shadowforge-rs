@@ -12,8 +12,8 @@ use crate::application::services::{
     AnalyseService, AppError, ArchiveService, EmbedService, ExtractService, KeyGenService,
     ScrubService,
 };
-use crate::domain::errors::{CanaryError, StegoError};
-use crate::domain::ports::{EmbedTechnique, ExtractTechnique, MediaLoader};
+use crate::domain::errors::{CanaryError, OpsecError, StegoError};
+use crate::domain::ports::{EmbedTechnique, ExtractTechnique, GeographicDistributor, MediaLoader};
 use crate::domain::types::{CoverMedia, CoverMediaKind, Payload, StegoTechnique};
 
 use super::cli::{self, Cli, Commands};
@@ -255,19 +255,8 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     let covers = covers?;
 
     let profile = resolve_profile(args.profile, args.platform);
-    let hmac_key = match &args.hmac_key {
-        Some(p) => fs_read(p)?,
-        None => crate::adapters::distribution::DistributorImpl::generate_hmac_key(),
-    };
-    let distributor = crate::adapters::distribution::DistributorImpl::new(hmac_key.clone());
-
-    let mut stego_covers = crate::application::services::DistributeService::distribute(
-        &payload,
-        covers,
-        &profile,
-        &distributor,
-        embedder.as_ref(),
-    )?;
+    let (mut stego_covers, generated_hmac_key) =
+        distribute_covers(args, &payload, covers, &profile, embedder.as_ref())?;
 
     // Embed canary shard if requested
     let canary_metadata = if args.canary {
@@ -307,7 +296,7 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     fs_write(&args.output_archive, &archive)?;
 
     // Persist HMAC key so extract-distributed can use it
-    if args.hmac_key.is_none() {
+    if let Some(hmac_key) = generated_hmac_key {
         let key_path = args.output_archive.with_extension("hmac");
         fs_write(&key_path, &hmac_key)?;
         eprintln!("HMAC key written to {}", key_path.display());
@@ -332,6 +321,61 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
         args.output_archive.display()
     );
     Ok(())
+}
+
+fn distribute_covers(
+    args: &cli::EmbedDistributedArgs,
+    payload: &Payload,
+    covers: Vec<CoverMedia>,
+    profile: &crate::domain::types::EmbeddingProfile,
+    embedder: &dyn EmbedTechnique,
+) -> Result<(Vec<CoverMedia>, Option<Vec<u8>>), AppError> {
+    if let Some(manifest_path) = &args.geo_manifest {
+        let manifest = load_geographic_manifest(manifest_path)?;
+        let geo_distributor = crate::adapters::opsec::GeographicDistributorImpl::new();
+        let stego_covers =
+            geo_distributor.distribute_with_manifest(payload, covers, &manifest, embedder)?;
+        return Ok((stego_covers, None));
+    }
+
+    let hmac_key = if let Some(p) = &args.hmac_key {
+        fs_read(p)?
+    } else {
+        crate::adapters::distribution::DistributorImpl::generate_hmac_key()
+    };
+    let generated_hmac_key = if args.hmac_key.is_none() {
+        Some(hmac_key.clone())
+    } else {
+        None
+    };
+    let distributor = crate::adapters::distribution::DistributorImpl::new_with_shard_config(
+        hmac_key,
+        args.data_shards,
+        args.parity_shards,
+    );
+    let stego_covers = crate::application::services::DistributeService::distribute(
+        payload,
+        covers,
+        profile,
+        &distributor,
+        embedder,
+    )?;
+    Ok((stego_covers, generated_hmac_key))
+}
+
+fn load_geographic_manifest(
+    manifest_path: &Path,
+) -> Result<crate::domain::types::GeographicManifest, AppError> {
+    let manifest_raw = fs_read(manifest_path)?;
+    let manifest_str = String::from_utf8(manifest_raw).map_err(|e| OpsecError::ManifestError {
+        reason: format!("manifest is not valid UTF-8: {e}"),
+    })?;
+    toml::from_str(&manifest_str).map_err(|e| {
+        OpsecError::ManifestError {
+            reason: format!("manifest parse failed: {e}"),
+        }
+        .into()
+    })
 }
 
 // ─── Extract-distributed ──────────────────────────────────────────────────────
@@ -1126,6 +1170,17 @@ fn collect_cover_paths(pattern: &str) -> Result<Vec<PathBuf>, AppError> {
             )?
             .filter_map(Result::ok)
             .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect()
+    } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        glob::glob(pattern)
+            .map_err(
+                |_| crate::domain::errors::DistributionError::InsufficientCovers {
+                    needed: 1,
+                    got: 0,
+                },
+            )?
+            .filter_map(Result::ok)
             .filter(|p| p.is_file())
             .collect()
     } else {

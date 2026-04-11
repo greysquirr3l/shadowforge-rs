@@ -10,6 +10,8 @@ use crate::domain::types::{CoverMedia, DistributionPattern, EmbeddingProfile, Pa
 pub struct DistributorImpl {
     /// HMAC key for shard integrity tags.
     hmac_key: Vec<u8>,
+    /// Optional explicit shard topology from CLI.
+    shard_config: Option<(u8, u8)>,
 }
 
 impl Default for DistributorImpl {
@@ -22,7 +24,23 @@ impl DistributorImpl {
     /// Create a new distributor with the given HMAC key.
     #[must_use]
     pub const fn new(hmac_key: Vec<u8>) -> Self {
-        Self { hmac_key }
+        Self {
+            hmac_key,
+            shard_config: None,
+        }
+    }
+
+    /// Create a new distributor with explicit data/parity shard counts.
+    #[must_use]
+    pub const fn new_with_shard_config(
+        hmac_key: Vec<u8>,
+        data_shards: u8,
+        parity_shards: u8,
+    ) -> Self {
+        Self {
+            hmac_key,
+            shard_config: Some((data_shards, parity_shards)),
+        }
     }
 
     /// Generate a random 32-byte HMAC key.
@@ -49,7 +67,7 @@ impl Distributor for DistributorImpl {
         covers: Vec<CoverMedia>,
         embedder: &dyn EmbedTechnique,
     ) -> Result<Vec<CoverMedia>, DistributionError> {
-        let pattern = pattern_from_profile(profile, covers.len());
+        let pattern = pattern_from_profile(profile, covers.len(), self.shard_config);
         validate_cover_count(&pattern, covers.len())?;
 
         match pattern {
@@ -81,27 +99,48 @@ impl Distributor for DistributorImpl {
 ///
 /// The adapter infers the distribution pattern from the profile and cover
 /// count rather than forcing the caller to specify both.
-fn pattern_from_profile(profile: &EmbeddingProfile, cover_count: usize) -> DistributionPattern {
-    // Standard profiles default to OneToOne for single cover, OneToMany otherwise
+fn pattern_from_profile(
+    profile: &EmbeddingProfile,
+    cover_count: usize,
+    shard_config: Option<(u8, u8)>,
+) -> DistributionPattern {
+    // Default to OneToOne for single cover, OneToMany otherwise.
+    // Non-standard profiles retain distribution topology and influence embedding behavior.
+    let default_one_to_many = || {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "cover_count bounded by caller"
+        )]
+        let data = (cover_count.saturating_sub(1)) as u8;
+        DistributionPattern::OneToMany {
+            data_shards: data.max(1),
+            parity_shards: 1,
+        }
+    };
+
+    let explicit_one_to_many =
+        |data_shards: u8, parity_shards: u8| DistributionPattern::OneToMany {
+            data_shards: data_shards.max(1),
+            parity_shards: parity_shards.max(1),
+        };
+
+    let one_to_many = |shard_config: Option<(u8, u8)>| {
+        shard_config.map_or_else(default_one_to_many, |(data_shards, parity_shards)| {
+            explicit_one_to_many(data_shards, parity_shards)
+        })
+    };
+
     match profile {
-        EmbeddingProfile::Standard => {
+        EmbeddingProfile::Standard
+        | EmbeddingProfile::Adaptive { .. }
+        | EmbeddingProfile::CompressionSurvivable { .. } => {
             if cover_count <= 1 {
                 DistributionPattern::OneToOne
             } else {
-                // Default: split evenly across covers with 1 parity shard
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "cover_count bounded by caller"
-                )]
-                let data = (cover_count.saturating_sub(1)) as u8;
-                let parity = 1u8;
-                DistributionPattern::OneToMany {
-                    data_shards: data.max(1),
-                    parity_shards: parity,
-                }
+                one_to_many(shard_config)
             }
         }
-        _ => DistributionPattern::OneToOne,
+        EmbeddingProfile::CorpusBased => DistributionPattern::OneToOne,
     }
 }
 
@@ -325,15 +364,21 @@ mod tests {
     }
 
     #[test]
-    fn pattern_from_profile_non_standard_returns_one_to_one() {
+    fn pattern_from_profile_non_standard_preserves_distribution_topology() {
         let adaptive = EmbeddingProfile::Adaptive {
             max_detectability_db: 0.5,
         };
-        let pattern = pattern_from_profile(&adaptive, 5);
-        assert_eq!(pattern, DistributionPattern::OneToOne);
+        let pattern = pattern_from_profile(&adaptive, 5, None);
+        assert_eq!(
+            pattern,
+            DistributionPattern::OneToMany {
+                data_shards: 4,
+                parity_shards: 1,
+            }
+        );
 
         let corpus = EmbeddingProfile::CorpusBased;
-        let pattern = pattern_from_profile(&corpus, 10);
+        let pattern = pattern_from_profile(&corpus, 10, None);
         assert_eq!(pattern, DistributionPattern::OneToOne);
     }
 
