@@ -49,13 +49,14 @@ jobs:
             archive_ext: zip
             pdfium_asset: pdfium-win-x64.tgz
 
-          # macOS Intel  — Tier 2 as of Rust 1.90 (Apple Silicon transition);
-          # retained for legacy compatibility. Uses macos-13, the last
-          # Intel-based GitHub Actions runner (macos-latest is now ARM).
+          # macOS Intel  — cross-compiled from macos-latest (ARM) runner.
+          # macos-13 (Intel) was retired by GitHub; Apple's LLVM toolchain
+          # on ARM natively supports the x86_64-apple-darwin target.
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
             archive_ext: tar.gz
             pdfium_asset: pdfium-mac-x64.tgz
+            cross: true
 
           # Windows ARM64 — Tier 1 as of Rust 1.91.
           # Uses the native windows-11-arm runner to avoid needing the MSVC
@@ -67,7 +68,7 @@ jobs:
             pdfium_asset: pdfium-win-arm64.tgz
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0   # needed for vergen git SHA
 
@@ -77,8 +78,8 @@ jobs:
           toolchain: "1.94.1"
           targets: ${{ matrix.target }}
 
-      - name: Install cross (if cross-compiling)
-        if: matrix.cross
+      - name: Install cross (Linux cross-compiling only)
+        if: matrix.cross && runner.os == 'Linux'
         run: cargo install cross
 
       - name: Cache cargo
@@ -96,12 +97,16 @@ jobs:
         if: "!matrix.cross"
         run: cargo build --release --target ${{ matrix.target }} --all-features
 
-      - name: Build (cross)
-        if: matrix.cross
+      - name: Build (cross Linux)
+        if: matrix.cross && runner.os == 'Linux'
         run: cross build --release --target ${{ matrix.target }} --all-features
 
+      - name: Build (cross macOS — native toolchain)
+        if: matrix.cross && runner.os == 'macOS'
+        run: cargo build --release --target ${{ matrix.target }} --all-features
+
       - name: Generate shell completions (native)
-        if: "!matrix.cross"
+        if: "!matrix.cross || runner.os == 'macOS'"
         shell: bash
         run: |
           BIN="target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}"
@@ -114,11 +119,11 @@ jobs:
           "$BIN" completions fish   -o completions/shadowforge.fish
           "$BIN" completions powershell -o completions/_shadowforge.ps1
 
-      - name: Generate shell completions (cross)
-        if: matrix.cross
+      - name: Generate shell completions (cross — Linux only, runs on host)
+        if: matrix.cross && runner.os == 'Linux'
         shell: bash
         run: |
-          # Cross-compiled binary can't run on host; generate via cargo run on host
+          # Cross-compiled Linux binary can't run on the host; build a host binary
           mkdir -p completions
           cargo run --release -- completions bash   -o completions/shadowforge.bash
           cargo run --release -- completions zsh    -o completions/_shadowforge
@@ -149,7 +154,7 @@ jobs:
 
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.3.2
         with:
           files: ${{ env.ASSET }}
           draft: false
@@ -163,7 +168,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
