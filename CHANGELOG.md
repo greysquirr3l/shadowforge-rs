@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-10
+
 ### Added
 
 - **mdbook documentation site** — 39 pages covering user guide, CLI reference,
@@ -126,5 +128,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Pre-production: external security audit pending (planned for v0.2.0)
 - PDF support requires pdfium system library — see README for installation
 
-[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.2.0
 [0.1.0]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.1.0
