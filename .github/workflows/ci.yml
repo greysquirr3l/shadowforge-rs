@@ -43,6 +43,14 @@ jobs:
           curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz | tar xz
           echo "PDFIUM_DYNAMIC_LIB_PATH=$(pwd)/lib" >> $GITHUB_ENV
 
+      - name: Install pdfium (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz | tar xz
+          echo "PDFIUM_DYNAMIC_LIB_PATH=$(pwd)/lib" >> $GITHUB_ENV
+          echo "$(pwd)/lib" >> $GITHUB_PATH
+
       - name: Build
         run: cargo build --workspace --all-features
 
