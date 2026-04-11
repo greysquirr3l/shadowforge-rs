@@ -18,6 +18,8 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    env:
+      ASSET: ""   # set by Package steps at runtime; declared here to satisfy static analysis
     strategy:
       fail-fast: false
       matrix:
