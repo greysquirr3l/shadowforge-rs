@@ -354,9 +354,8 @@ fn distribute_covers(
         args.data_shards,
         args.parity_shards,
     );
-    let matcher = crate::adapters::adaptive::CoverProfileMatcherImpl::with_built_in();
-    let optimiser = crate::adapters::adaptive::AdaptiveOptimiserImpl::with_built_in();
-    let compressor = crate::adapters::adaptive::CompressionSimulatorImpl;
+    let (matcher, optimiser, compressor) =
+        crate::adapters::adaptive::build_adaptive_profile_deps();
 
     let stego_covers =
         crate::application::services::DistributeService::distribute_with_profile_hardening(
@@ -1228,9 +1227,7 @@ fn resolve_profile(
 ) -> crate::domain::types::EmbeddingProfile {
     match profile {
         cli::Profile::Standard => crate::domain::types::EmbeddingProfile::Standard,
-        cli::Profile::Adaptive => crate::domain::types::EmbeddingProfile::Adaptive {
-            max_detectability_db: -12.0,
-        },
+        cli::Profile::Adaptive => crate::domain::types::EmbeddingProfile::default_adaptive(),
         cli::Profile::Survivable => {
             let p = platform.map_or(crate::domain::types::PlatformProfile::Instagram, |pl| {
                 resolve_platform(pl)
