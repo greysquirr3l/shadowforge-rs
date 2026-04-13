@@ -157,8 +157,12 @@ mod tests {
         let cover = make_image_cover(CoverMediaKind::PngImage, 8, 8, vec![128u8; 8 * 8 * 4]);
 
         let report = analyser.analyse(&cover, StegoTechnique::LsbImage)?;
+        assert!(
+            report.ai_watermark.is_some(),
+            "image analysis should include ai watermark assessment"
+        );
         let Some(ai_watermark) = report.ai_watermark else {
-            panic!("image analysis should include ai watermark assessment");
+            return Ok(());
         };
         assert!(ai_watermark.detected);
         assert_eq!(ai_watermark.model_id.as_deref(), Some("test-ai"));

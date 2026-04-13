@@ -18,8 +18,7 @@ use crate::domain::ports::{
     CoverProfileMatcher,
 };
 use crate::domain::types::{
-    AiWatermarkAssessment, Capacity, CoverMedia, CoverMediaKind, PlatformProfile,
-    StegoTechnique,
+    AiWatermarkAssessment, Capacity, CoverMedia, CoverMediaKind, PlatformProfile, StegoTechnique,
 };
 
 // ─── Built-in AI codebook ────────────────────────────────────────────────────
@@ -179,7 +178,8 @@ impl CoverProfileMatcherImpl {
             clippy::cast_precision_loss,
             reason = "small testable bin counts converted for a user-facing ratio"
         )]
-        let confidence = best_match.matched_strong_bins as f64 / best_match.total_strong_bins as f64;
+        let confidence =
+            best_match.matched_strong_bins as f64 / best_match.total_strong_bins as f64;
         let detected = best_match.matched_strong_bins
             >= Self::detection_threshold(best_match.total_strong_bins);
 
@@ -547,22 +547,25 @@ mod tests {
     }
 
     #[test]
-    fn assess_ai_watermark_detects_matching_profile() {
+    fn assess_ai_watermark_detects_matching_profile() -> Result<(), Box<dyn std::error::Error>> {
         let matcher = CoverProfileMatcherImpl::from_codebook(
             r#"{"profiles":[{"model_id":"test-ai","channel_weights":[1.0,1.0,1.0],"carrier_map":{"8x8":[{"freq":[0,0],"phase":0.0,"coherence":1.0}]}}]}"#,
-        )
-        .unwrap_or_else(|_| panic!("valid JSON codebook should parse"));
+        )?;
         let cover = make_cover(CoverMediaKind::PngImage, 8, 8);
 
         let assessment = matcher.assess_ai_watermark(&cover);
-        assert!(assessment.is_some());
+        assert!(
+            assessment.is_some(),
+            "expected ai watermark assessment for matching cover"
+        );
         let Some(assessment) = assessment else {
-            return;
+            return Ok(());
         };
         assert!(assessment.detected);
         assert_eq!(assessment.model_id.as_deref(), Some("test-ai"));
         assert_eq!(assessment.matched_strong_bins, 1);
         assert_eq!(assessment.total_strong_bins, 1);
+        Ok(())
     }
 
     #[test]
