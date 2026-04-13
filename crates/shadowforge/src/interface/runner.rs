@@ -13,7 +13,7 @@ use crate::application::services::{
     ExtractService, KeyGenService, ScrubService,
 };
 use crate::domain::errors::{CanaryError, OpsecError, StegoError};
-use crate::domain::ports::{EmbedTechnique, ExtractTechnique, GeographicDistributor, MediaLoader};
+use crate::domain::ports::{EmbedTechnique, ExtractTechnique, MediaLoader};
 use crate::domain::types::{CoverMedia, CoverMediaKind, Payload, Signature, StegoTechnique};
 
 use super::cli::{self, Cli, Commands};
@@ -389,7 +389,13 @@ fn distribute_covers(
         let manifest = load_geographic_manifest(manifest_path)?;
         let geo_distributor = crate::adapters::opsec::GeographicDistributorImpl::new();
         let stego_covers =
-            geo_distributor.distribute_with_manifest(payload, covers, &manifest, embedder)?;
+            crate::application::services::DistributeService::distribute_with_geographic_manifest(
+                payload,
+                covers,
+                &manifest,
+                embedder,
+                &geo_distributor,
+            )?;
         return Ok((stego_covers, None));
     }
 

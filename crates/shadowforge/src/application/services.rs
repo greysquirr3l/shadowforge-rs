@@ -18,14 +18,14 @@ use crate::domain::ports::{
     AdaptiveOptimiser, AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort,
     CapacityAnalyser, CompressionSimulator, CorpusIndex, CoverProfileMatcher, DeadDropEncoder,
     DeniableEmbedder, Distributor, EmbedTechnique, Encryptor, ExtractTechnique,
-    ForensicWatermarker, PanicWiper, Reconstructor, Signer, StyloScrubber, SymmetricCipher,
-    TimeLockService as TimeLockServicePort,
+    ForensicWatermarker, GeographicDistributor, PanicWiper, Reconstructor, Signer, StyloScrubber,
+    SymmetricCipher, TimeLockService as TimeLockServicePort,
 };
 use crate::domain::types::{
     AnalysisReport, ArchiveFormat, CanaryShard, CorpusEntry, CoverMedia, DeniableKeySet,
-    DeniablePayloadPair, EmbeddingProfile, KeyPair, PanicWipeConfig, Payload, PlatformProfile,
-    Signature, SpectralKey, StegoTechnique, StyloProfile, TimeLockPuzzle, WatermarkReceipt,
-    WatermarkTripwireTag,
+    DeniablePayloadPair, EmbeddingProfile, GeographicManifest, KeyPair, PanicWipeConfig, Payload,
+    PlatformProfile, Signature, SpectralKey, StegoTechnique, StyloProfile, TimeLockPuzzle,
+    WatermarkReceipt, WatermarkTripwireTag,
 };
 
 // ─── AppError ─────────────────────────────────────────────────────────────────
@@ -226,6 +226,20 @@ impl DistributeService {
         embedder: &dyn EmbedTechnique,
     ) -> Result<Vec<CoverMedia>, AppError> {
         Ok(distributor.distribute(payload, profile, covers, embedder)?)
+    }
+
+    /// Distribute `payload` across `covers` with a geographic manifest.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Opsec`] on manifest/distribution failures.
+    pub fn distribute_with_geographic_manifest(
+        payload: &Payload,
+        covers: Vec<CoverMedia>,
+        manifest: &GeographicManifest,
+        embedder: &dyn EmbedTechnique,
+        distributor: &dyn GeographicDistributor,
+    ) -> Result<Vec<CoverMedia>, AppError> {
+        Ok(distributor.distribute_with_manifest(payload, covers, manifest, embedder)?)
     }
 
     /// Distribute and apply profile-specific adaptive hardening.
@@ -622,7 +636,7 @@ impl CorpusService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::{Capacity, CoverMediaKind, Shard};
+    use crate::domain::types::{Capacity, CoverMediaKind, GeoShardEntry, Shard};
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -952,6 +966,20 @@ mod tests {
         }
     }
 
+    struct MockGeographicDistributor;
+
+    impl GeographicDistributor for MockGeographicDistributor {
+        fn distribute_with_manifest(
+            &self,
+            _payload: &Payload,
+            covers: Vec<CoverMedia>,
+            _manifest: &GeographicManifest,
+            _embedder: &dyn EmbedTechnique,
+        ) -> Result<Vec<CoverMedia>, OpsecError> {
+            Ok(covers)
+        }
+    }
+
     #[test]
     fn distribute_service_returns_covers() -> TestResult {
         let payload = Payload::from_bytes(b"payload".to_vec());
@@ -961,6 +989,32 @@ mod tests {
         let embedder = MockEmbedder;
         let result =
             DistributeService::distribute(&payload, covers, &profile, &distributor, &embedder)?;
+        assert_eq!(result.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn distribute_service_geographic_manifest_returns_covers() -> TestResult {
+        let payload = Payload::from_bytes(b"payload".to_vec());
+        let covers = vec![make_cover(64), make_cover(64)];
+        let manifest = GeographicManifest {
+            shards: vec![GeoShardEntry {
+                shard_index: 0,
+                jurisdiction: "US".to_string(),
+                holder_description: "test holder".to_string(),
+            }],
+            minimum_jurisdictions: 1,
+        };
+        let distributor = MockGeographicDistributor;
+        let embedder = MockEmbedder;
+
+        let result = DistributeService::distribute_with_geographic_manifest(
+            &payload,
+            covers,
+            &manifest,
+            &embedder,
+            &distributor,
+        )?;
         assert_eq!(result.len(), 2);
         Ok(())
     }
