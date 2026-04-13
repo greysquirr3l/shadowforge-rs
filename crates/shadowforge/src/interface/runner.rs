@@ -9,8 +9,8 @@ const MAX_STDIN_PAYLOAD: u64 = 256 * 1024 * 1024;
 use clap::Parser;
 
 use crate::application::services::{
-    AnalyseService, AppError, ArchiveService, EmbedService, ExtractService, KeyGenService,
-    ScrubService,
+    AnalyseService, AppError, ArchiveService, CipherService, EmbedService, ExtractService,
+    KeyGenService, ScrubService,
 };
 use crate::domain::errors::{CanaryError, OpsecError, StegoError};
 use crate::domain::ports::{EmbedTechnique, ExtractTechnique, GeographicDistributor, MediaLoader};
@@ -51,6 +51,7 @@ pub fn dispatch(cli: Cli) -> Result<(), AppError> {
         Commands::Corpus(args) => cmd_corpus(&args),
         Commands::Panic(args) => cmd_panic(&args),
         Commands::Completions(args) => cmd_completions(&args),
+        Commands::Cipher(args) => cmd_cipher(&args),
     }
 }
 
@@ -748,6 +749,56 @@ fn cmd_completions(args: &cli::CompletionsArgs) -> Result<(), AppError> {
         }
         None => {
             generate(args.shell, &mut cmd, "shadowforge", &mut io::stdout());
+        }
+    }
+    Ok(())
+}
+
+// ─── Cipher ───────────────────────────────────────────────────────────────────
+
+/// AES-256-GCM nonce length in bytes.
+const AES_GCM_NONCE_LEN: usize = 12;
+
+fn cmd_cipher(args: &cli::CipherArgs) -> Result<(), AppError> {
+    use rand_core::Rng as _;
+
+    let cipher = crate::adapters::crypto::Aes256GcmCipher;
+    match &args.subcmd {
+        cli::CipherSubcommand::Encrypt { input, key, output } => {
+            let plaintext = fs_read(input)?;
+            let key_bytes = fs_read(key)?;
+            let mut nonce = [0u8; AES_GCM_NONCE_LEN];
+            rand::rng().fill_bytes(&mut nonce);
+            let ciphertext = CipherService::encrypt(&cipher, &key_bytes, &nonce, &plaintext)?;
+            let mut out = Vec::with_capacity(AES_GCM_NONCE_LEN.strict_add(ciphertext.len()));
+            out.extend_from_slice(&nonce);
+            out.extend_from_slice(&ciphertext);
+            fs_write(output, &out)?;
+            eprintln!(
+                "Encrypted {} bytes -> {}",
+                plaintext.len(),
+                output.display()
+            );
+        }
+        cli::CipherSubcommand::Decrypt { input, key, output } => {
+            let data = fs_read(input)?;
+            let key_bytes = fs_read(key)?;
+            if data.len() < AES_GCM_NONCE_LEN {
+                return Err(AppError::Crypto(
+                    crate::domain::errors::CryptoError::InvalidNonceLength {
+                        expected: AES_GCM_NONCE_LEN,
+                        got: data.len(),
+                    },
+                ));
+            }
+            let (nonce, ciphertext) = data.split_at(AES_GCM_NONCE_LEN);
+            let plaintext = CipherService::decrypt(&cipher, &key_bytes, nonce, ciphertext)?;
+            fs_write(output, &plaintext)?;
+            eprintln!(
+                "Decrypted {} bytes -> {}",
+                plaintext.len(),
+                output.display()
+            );
         }
     }
     Ok(())

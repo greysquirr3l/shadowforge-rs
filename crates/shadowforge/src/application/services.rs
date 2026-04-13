@@ -18,7 +18,7 @@ use crate::domain::ports::{
     AdaptiveOptimiser, AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort,
     CapacityAnalyser, CompressionSimulator, CoverProfileMatcher, DeadDropEncoder, DeniableEmbedder,
     Distributor, EmbedTechnique, Encryptor, ExtractTechnique, ForensicWatermarker, PanicWiper,
-    Reconstructor, Signer, StyloScrubber, TimeLockService as TimeLockServicePort,
+    Reconstructor, Signer, StyloScrubber, SymmetricCipher, TimeLockService as TimeLockServicePort,
 };
 use crate::domain::types::{
     AnalysisReport, ArchiveFormat, CanaryShard, CoverMedia, DeniableKeySet, DeniablePayloadPair,
@@ -160,6 +160,39 @@ impl KeyGenService {
         signature: &Signature,
     ) -> Result<bool, AppError> {
         Ok(signer.verify(public_key, message, signature)?)
+    }
+}
+
+// ─── CipherService ───────────────────────────────────────────────────────────
+
+/// AES-256-GCM encrypt / decrypt orchestrator.
+pub struct CipherService;
+
+impl CipherService {
+    /// Encrypt `plaintext` with `key` and `nonce`.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Crypto`] on encryption failure.
+    pub fn encrypt(
+        cipher: &dyn SymmetricCipher,
+        key: &[u8],
+        nonce: &[u8],
+        plaintext: &[u8],
+    ) -> Result<Bytes, AppError> {
+        Ok(cipher.encrypt(key, nonce, plaintext)?)
+    }
+
+    /// Decrypt and authenticate `ciphertext` with `key` and `nonce`.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Crypto`] on decryption or authentication failure.
+    pub fn decrypt(
+        cipher: &dyn SymmetricCipher,
+        key: &[u8],
+        nonce: &[u8],
+        ciphertext: &[u8],
+    ) -> Result<Bytes, AppError> {
+        Ok(cipher.decrypt(key, nonce, ciphertext)?)
     }
 }
 
@@ -1394,5 +1427,34 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("crypto"));
         assert!(msg.contains("oops"));
+    }
+
+    // ─── CipherService ────────────────────────────────────────────────────
+
+    #[test]
+    fn cipher_service_encrypt_decrypt_roundtrip() -> TestResult {
+        use crate::adapters::crypto::Aes256GcmCipher;
+        let cipher = Aes256GcmCipher;
+        let key = vec![0u8; 32];
+        let nonce = vec![1u8; 12];
+        let plaintext = b"secret cipher payload";
+        let ct = CipherService::encrypt(&cipher, &key, &nonce, plaintext)?;
+        let pt = CipherService::decrypt(&cipher, &key, &nonce, &ct)?;
+        assert_eq!(pt.as_ref(), plaintext);
+        Ok(())
+    }
+
+    #[test]
+    fn cipher_service_decrypt_fails_on_tamper() -> TestResult {
+        use crate::adapters::crypto::Aes256GcmCipher;
+        let cipher = Aes256GcmCipher;
+        let key = vec![0u8; 32];
+        let nonce = vec![1u8; 12];
+        let plaintext = b"secret cipher payload";
+        let mut ct = CipherService::encrypt(&cipher, &key, &nonce, plaintext)?.to_vec();
+        *ct.get_mut(0).ok_or("empty ciphertext")? ^= 0xFF;
+        let result = CipherService::decrypt(&cipher, &key, &nonce, &ct);
+        assert!(result.is_err(), "tampered ciphertext must fail decryption");
+        Ok(())
     }
 }
