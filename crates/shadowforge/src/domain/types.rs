@@ -1046,15 +1046,11 @@ mod tests {
         // The default adaptive profile must encode the canonical threshold so
         // the runner never hard-codes a magic number.
         let profile = EmbeddingProfile::default_adaptive();
-        let EmbeddingProfile::Adaptive { max_detectability_db } = profile else {
-            panic!("expected Adaptive variant");
-        };
-        #[expect(clippy::float_cmp)]
-        {
-            assert!(
-                (max_detectability_db - DEFAULT_ADAPTIVE_DETECTABILITY_DB).abs() < f64::EPSILON,
-                "expected {DEFAULT_ADAPTIVE_DETECTABILITY_DB}, got {max_detectability_db}"
-            );
-        }
+        assert!(matches!(
+            profile,
+            EmbeddingProfile::Adaptive {
+                max_detectability_db
+            } if (max_detectability_db - DEFAULT_ADAPTIVE_DETECTABILITY_DB).abs() < f64::EPSILON
+        ));
     }
 }

@@ -1569,7 +1569,10 @@ mod tests {
         let payload = Payload::from_bytes(bytes::Bytes::from_static(b"hello"));
         let results = CorpusService::search(&idx, &payload, StegoTechnique::LsbImage, 5)?;
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].path, entry.path);
+        assert_eq!(
+            results.first().map(|it| it.path.as_str()),
+            Some(entry.path.as_str())
+        );
         Ok(())
     }
 
@@ -1580,7 +1583,10 @@ mod tests {
         let payload = Payload::from_bytes(bytes::Bytes::from_static(b"hello"));
         let results = CorpusService::search_for_model(&idx, &payload, "gemini", (1920, 1080), 3)?;
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].path, entry.path);
+        assert_eq!(
+            results.first().map(|it| it.path.as_str()),
+            Some(entry.path.as_str())
+        );
         Ok(())
     }
 
@@ -1589,8 +1595,11 @@ mod tests {
         let idx = MockCorpusIndex::new(7, vec![]);
         let stats = CorpusService::model_stats(&idx);
         assert_eq!(stats.len(), 1);
-        assert_eq!(stats[0].0.model_id, "test-model");
-        assert_eq!(stats[0].1, 7);
+        assert_eq!(
+            stats.first().map(|(k, _)| k.model_id.as_str()),
+            Some("test-model")
+        );
+        assert_eq!(stats.first().map(|(_, c)| *c), Some(7));
     }
 
     // ─── CipherService ────────────────────────────────────────────────────

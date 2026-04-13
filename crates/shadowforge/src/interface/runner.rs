@@ -354,8 +354,7 @@ fn distribute_covers(
         args.data_shards,
         args.parity_shards,
     );
-    let (matcher, optimiser, compressor) =
-        crate::adapters::adaptive::build_adaptive_profile_deps();
+    let (matcher, optimiser, compressor) = crate::adapters::adaptive::build_adaptive_profile_deps();
 
     let stego_covers =
         crate::application::services::DistributeService::distribute_with_profile_hardening(
@@ -1457,7 +1456,7 @@ mod tests {
                 bytes: 1024,
                 technique: ST::LsbImage,
             },
-            chi_square_score: 3.14,
+            chi_square_score: std::f64::consts::PI,
             detectability_risk: DetectabilityRisk::Low,
             recommended_max_payload_bytes: 512,
             spectral_score: None,
