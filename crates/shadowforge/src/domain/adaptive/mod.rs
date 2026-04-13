@@ -7,7 +7,7 @@ use rand::RngExt as _;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::domain::analysis::chi_square_score;
+use crate::domain::analysis::pair_delta_chi_square_score;
 use crate::domain::ports::CoverProfile;
 
 // ─── BinMask ─────────────────────────────────────────────────────────────────
@@ -241,7 +241,9 @@ pub fn permutation_search(
     let n = stego_bytes.len();
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut best_perm = Permutation::identity(n);
-    let mut best_score = chi_square_score(stego_bytes);
+    // Use pair-delta chi-square (order-sensitive) so that swapping bytes
+    // actually changes the score and the hill-climb can make progress.
+    let mut best_score = pair_delta_chi_square_score(stego_bytes);
 
     // Collect safe (non-occupied) positions to limit candidate swaps.
     let safe_positions: Vec<usize> = (0..n)
@@ -271,7 +273,7 @@ pub fn permutation_search(
         current_map.swap(pos_a, pos_b);
         current_data.swap(pos_a, pos_b);
 
-        let score = chi_square_score(&current_data);
+        let score = pair_delta_chi_square_score(&current_data);
         if score < best_score {
             best_score = score;
             best_perm = Permutation {
@@ -318,7 +320,7 @@ mod tests {
     fn camera_profile_yields_all_zeros_mask() {
         use crate::domain::ports::CameraProfile;
         let profile = CoverProfile::Camera(CameraProfile {
-            quantisation_table: vec![0u16; 64],
+            quantisation_table: [0u16; 64],
             noise_floor_db: -80.0,
             model_id: "canon".to_string(),
         });
@@ -365,7 +367,7 @@ mod tests {
         let data = vec![1u8, 2, 3, 4, 5, 6];
         let mask = BinMask::build(
             &CoverProfile::Camera(crate::domain::ports::CameraProfile {
-                quantisation_table: vec![0u16; 64],
+                quantisation_table: [0u16; 64],
                 noise_floor_db: -80.0,
                 model_id: "test".to_string(),
             }),
@@ -385,7 +387,7 @@ mod tests {
         let data: Vec<u8> = (0u8..64).collect();
         let mask = BinMask::build(
             &CoverProfile::Camera(crate::domain::ports::CameraProfile {
-                quantisation_table: vec![0u16; 64],
+                quantisation_table: [0u16; 64],
                 noise_floor_db: -80.0,
                 model_id: "test".to_string(),
             }),
@@ -403,7 +405,7 @@ mod tests {
         let data: Vec<u8> = vec![10, 20, 30, 40, 50];
         let mask = BinMask::build(
             &CoverProfile::Camera(crate::domain::ports::CameraProfile {
-                quantisation_table: vec![0u16; 64],
+                quantisation_table: [0u16; 64],
                 noise_floor_db: -80.0,
                 model_id: "test".to_string(),
             }),
@@ -436,7 +438,7 @@ mod tests {
         data.extend_from_slice(&[0u8; 256]); // add 256 zeros → heavily skewed histogram
         let mask = BinMask::build(
             &CoverProfile::Camera(crate::domain::ports::CameraProfile {
-                quantisation_table: vec![0u16; 64],
+                quantisation_table: [0u16; 64],
                 noise_floor_db: -80.0,
                 model_id: "test".to_string(),
             }),

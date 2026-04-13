@@ -339,12 +339,30 @@ pub trait ArchiveHandler {
 
 // ─── Adaptive Embedding ───────────────────────────────────────────────────────
 
+/// Serde helper for `[u16; 64]` — serde only auto-derives array impls up to
+/// `[T; 32]`, so we provide a thin wrapper using `Vec<u16>` as the wire format.
+mod serde_quant_table {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(arr: &[u16; 64], s: S) -> Result<S::Ok, S::Error> {
+        arr.as_slice().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u16; 64], D::Error> {
+        let v = Vec::<u16>::deserialize(d)?;
+        v.as_slice().try_into().map_err(|_| {
+            serde::de::Error::invalid_length(v.len(), &"exactly 64 JPEG quantisation coefficients")
+        })
+    }
+}
+
 /// Camera-model statistical fingerprint — used to defeat model-based
 /// steganalysis by matching the cover's noise floor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraProfile {
     /// JPEG quantisation table (64 coefficients in zig-zag order).
-    pub quantisation_table: Vec<u16>,
+    #[serde(with = "serde_quant_table")]
+    pub quantisation_table: [u16; 64],
     /// Estimated noise floor of the camera sensor (in decibels).
     pub noise_floor_db: f64,
     /// Human-readable camera model identifier.
@@ -384,8 +402,16 @@ pub struct CarrierBin {
     /// Expected phase angle of the carrier (radians).
     pub phase: f64,
     /// Measured phase coherence across reference images, clamped to
-    /// `0.0..=1.0` by the constructor.
+    /// `0.0..=1.0` by the constructor.  The custom deserializer enforces
+    /// the same clamp so untrusted profiles cannot bypass it.
+    #[serde(deserialize_with = "de_clamp_coherence")]
     coherence: f64,
+}
+
+/// Serde deserializer that clamps a `f64` to `0.0..=1.0`.
+fn de_clamp_coherence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    let v = f64::deserialize(d)?;
+    Ok(v.clamp(0.0, 1.0))
 }
 
 impl CarrierBin {
@@ -837,7 +863,7 @@ mod cover_profile_tests {
     #[test]
     fn camera_profile_model_id_via_cover_profile() {
         let profile = CoverProfile::Camera(CameraProfile {
-            quantisation_table: vec![0u16; 64],
+            quantisation_table: [0u16; 64],
             noise_floor_db: -80.0,
             model_id: "canon-eos-r6".to_string(),
         });
@@ -927,7 +953,7 @@ mod cover_profile_tests {
     #[test]
     fn camera_cover_profile_round_trips_through_serde_json() -> TestResult {
         let profile = CoverProfile::Camera(CameraProfile {
-            quantisation_table: vec![2u16; 64],
+            quantisation_table: [2u16; 64],
             noise_floor_db: -75.0,
             model_id: "nikon-z9".to_string(),
         });
