@@ -14,7 +14,7 @@ use crate::application::services::{
 };
 use crate::domain::errors::{CanaryError, OpsecError, StegoError};
 use crate::domain::ports::{EmbedTechnique, ExtractTechnique, GeographicDistributor, MediaLoader};
-use crate::domain::types::{CoverMedia, CoverMediaKind, Payload, StegoTechnique};
+use crate::domain::types::{CoverMedia, CoverMediaKind, Payload, Signature, StegoTechnique};
 
 use super::cli::{self, Cli, Commands};
 
@@ -64,10 +64,36 @@ fn print_version() {
 // ─── Keygen ───────────────────────────────────────────────────────────────────
 
 fn cmd_keygen(args: &cli::KeygenArgs) -> Result<(), AppError> {
-    let dir = &args.output;
+    match &args.subcmd {
+        Some(cli::KeygenSubcommand::Sign {
+            input,
+            secret_key,
+            output,
+        }) => cmd_keygen_sign(input, secret_key, output),
+        Some(cli::KeygenSubcommand::Verify {
+            input,
+            public_key,
+            signature,
+        }) => cmd_keygen_verify(input, public_key, signature),
+        None => cmd_keygen_generate(args),
+    }
+}
+
+fn cmd_keygen_generate(args: &cli::KeygenArgs) -> Result<(), AppError> {
+    let Some(dir) = args.output.as_ref() else {
+        return Err(AppError::Stego(StegoError::MalformedCoverData {
+            reason: "--output is required when no keygen subcommand is used".to_string(),
+        }));
+    };
+    let Some(algorithm) = args.algorithm else {
+        return Err(AppError::Stego(StegoError::MalformedCoverData {
+            reason: "--algorithm is required when no keygen subcommand is used".to_string(),
+        }));
+    };
+
     fs_create_dir_all(dir)?;
 
-    match args.algorithm {
+    match algorithm {
         cli::Algorithm::Kyber1024 => {
             let enc = crate::adapters::crypto::MlKemEncryptor;
             let kp = KeyGenService::generate_keypair(&enc)?;
@@ -83,6 +109,34 @@ fn cmd_keygen(args: &cli::KeygenArgs) -> Result<(), AppError> {
     }
     eprintln!("Keys written to {}", dir.display());
     Ok(())
+}
+
+fn cmd_keygen_sign(input: &Path, secret_key: &Path, output: &Path) -> Result<(), AppError> {
+    let signer = crate::adapters::crypto::MlDsaSigner;
+    let message = fs_read(input)?;
+    let sk = fs_read(secret_key)?;
+    let signature = KeyGenService::sign(&signer, &sk, &message)?;
+    fs_write(output, signature.0.as_ref())?;
+    eprintln!("Signature written to {}", output.display());
+    Ok(())
+}
+
+fn cmd_keygen_verify(input: &Path, public_key: &Path, signature: &Path) -> Result<(), AppError> {
+    let signer = crate::adapters::crypto::MlDsaSigner;
+    let message = fs_read(input)?;
+    let pk = fs_read(public_key)?;
+    let sig = Signature(bytes::Bytes::from(fs_read(signature)?));
+    let valid = KeyGenService::verify(&signer, &pk, &message, &sig)?;
+    if valid {
+        eprintln!("Signature verification: ok");
+        Ok(())
+    } else {
+        Err(AppError::Crypto(
+            crate::domain::errors::CryptoError::VerificationFailed {
+                reason: "invalid signature".to_string(),
+            },
+        ))
+    }
 }
 
 // ─── Embed ────────────────────────────────────────────────────────────────────
@@ -1335,10 +1389,11 @@ fn load_watermark_tags(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_embedder, build_extractor, cmd_extract, load_cover, load_cover_from_path,
+        build_embedder, build_extractor, cmd_extract, cmd_keygen, load_cover, load_cover_from_path,
         save_cover_to_path,
     };
-    use crate::application::services::DeniableEmbedService;
+    use crate::application::services::{AppError, DeniableEmbedService};
+    use crate::domain::errors::CryptoError;
     use crate::domain::types::{CoverMediaKind, StegoTechnique};
     use crate::interface::cli;
     use image::{DynamicImage, Rgba, RgbaImage};
@@ -1439,6 +1494,94 @@ mod tests {
 
         let extracted = fs::read(output_path)?;
         assert_eq!(extracted, b"real secret");
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_sign_produces_signature_artifact() -> TestResult {
+        let dir = tempdir()?;
+        let keys_dir = dir.path().join("keys");
+        let msg_path = dir.path().join("message.bin");
+        let sig_path = dir.path().join("message.sig");
+
+        let generate = cli::KeygenArgs {
+            subcmd: None,
+            algorithm: Some(cli::Algorithm::Dilithium3),
+            output: Some(keys_dir.clone()),
+        };
+        cmd_keygen(&generate)?;
+
+        fs::write(&msg_path, b"hello signer")?;
+        let sign = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Sign {
+                input: msg_path,
+                secret_key: keys_dir.join("secret.key"),
+                output: sig_path.clone(),
+            }),
+            algorithm: None,
+            output: None,
+        };
+        cmd_keygen(&sign)?;
+
+        let sig = fs::read(sig_path)?;
+        assert!(!sig.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_verify_reports_success_and_failure_status() -> TestResult {
+        let dir = tempdir()?;
+        let keys_dir = dir.path().join("keys");
+        let msg_path = dir.path().join("message.bin");
+        let tampered_path = dir.path().join("message_tampered.bin");
+        let sig_path = dir.path().join("message.sig");
+
+        let generate = cli::KeygenArgs {
+            subcmd: None,
+            algorithm: Some(cli::Algorithm::Dilithium3),
+            output: Some(keys_dir.clone()),
+        };
+        cmd_keygen(&generate)?;
+
+        fs::write(&msg_path, b"signed message")?;
+        fs::write(&tampered_path, b"signed message with tamper")?;
+
+        let sign = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Sign {
+                input: msg_path.clone(),
+                secret_key: keys_dir.join("secret.key"),
+                output: sig_path.clone(),
+            }),
+            algorithm: None,
+            output: None,
+        };
+        cmd_keygen(&sign)?;
+
+        let verify_ok = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Verify {
+                input: msg_path,
+                public_key: keys_dir.join("public.key"),
+                signature: sig_path.clone(),
+            }),
+            algorithm: None,
+            output: None,
+        };
+        assert!(cmd_keygen(&verify_ok).is_ok());
+
+        let verify_fail = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Verify {
+                input: tampered_path,
+                public_key: keys_dir.join("public.key"),
+                signature: sig_path,
+            }),
+            algorithm: None,
+            output: None,
+        };
+        let err = cmd_keygen(&verify_fail).err();
+        assert!(matches!(
+            err,
+            Some(AppError::Crypto(CryptoError::VerificationFailed { .. }))
+        ));
         Ok(())
     }
 
