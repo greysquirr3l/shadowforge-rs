@@ -366,6 +366,30 @@ impl CompressionSimulator for CompressionSimulatorImpl {
     }
 }
 
+// ─── Dependency factory ───────────────────────────────────────────────────────
+
+/// Construct the three built-in adaptive adapters that together form the
+/// default profile-hardening dependency set.
+///
+/// Call sites should keep the returned values alive for as long as an
+/// [`crate::application::services::AdaptiveProfileDeps`] that borrows them
+/// is in scope.
+///
+/// Placing this factory in the adapter layer keeps the interface layer free
+/// from knowing *which* concrete types implement the adaptive port traits.
+#[must_use]
+pub fn build_adaptive_profile_deps() -> (
+    CoverProfileMatcherImpl,
+    AdaptiveOptimiserImpl,
+    CompressionSimulatorImpl,
+) {
+    (
+        CoverProfileMatcherImpl::with_built_in(),
+        AdaptiveOptimiserImpl::with_built_in(),
+        CompressionSimulatorImpl,
+    )
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn extract_green_f32(data: &Bytes, width: u32, height: u32) -> Vec<f32> {
@@ -551,5 +575,12 @@ mod tests {
             return;
         };
         assert!(t_cap.bytes > i_cap.bytes);
+    }
+
+    #[test]
+    fn build_adaptive_profile_deps_returns_functional_impls() {
+        let (matcher, _optimiser, _compressor) = build_adaptive_profile_deps();
+        // The matcher must have loaded the built-in codebook.
+        assert!(!matcher.ai_profiles.is_empty());
     }
 }

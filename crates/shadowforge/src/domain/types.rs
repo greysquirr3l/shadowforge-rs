@@ -190,6 +190,24 @@ pub enum EmbeddingProfile {
     CorpusBased,
 }
 
+/// Maximum detectability budget (dB) used when no explicit value is configured.
+///
+/// Chosen as a conservative threshold that balances stealth and payload
+/// capacity.  A negative value means the stego cover must have *lower* spectral
+/// energy than the original.
+pub const DEFAULT_ADAPTIVE_DETECTABILITY_DB: f64 = -12.0;
+
+impl EmbeddingProfile {
+    /// Return the standard adaptive profile with the default detectability
+    /// budget ([`DEFAULT_ADAPTIVE_DETECTABILITY_DB`]).
+    #[must_use]
+    pub const fn default_adaptive() -> Self {
+        Self::Adaptive {
+            max_detectability_db: DEFAULT_ADAPTIVE_DETECTABILITY_DB,
+        }
+    }
+}
+
 // ─── DistributionPattern ──────────────────────────────────────────────────────
 
 /// How payload shards are distributed across carriers.
@@ -1021,5 +1039,22 @@ mod tests {
         let decoded: CorpusEntry = serde_json::from_str(&json)?;
         assert!(decoded.spectral_key.is_none());
         Ok(())
+    }
+
+    #[test]
+    fn default_adaptive_uses_named_constant() {
+        // The default adaptive profile must encode the canonical threshold so
+        // the runner never hard-codes a magic number.
+        let profile = EmbeddingProfile::default_adaptive();
+        let EmbeddingProfile::Adaptive { max_detectability_db } = profile else {
+            panic!("expected Adaptive variant");
+        };
+        #[expect(clippy::float_cmp)]
+        {
+            assert!(
+                (max_detectability_db - DEFAULT_ADAPTIVE_DETECTABILITY_DB).abs() < f64::EPSILON,
+                "expected {DEFAULT_ADAPTIVE_DETECTABILITY_DB}, got {max_detectability_db}"
+            );
+        }
     }
 }
