@@ -861,6 +861,34 @@ mod tests {
         }
     }
 
+    struct MockSelectiveSigner;
+
+    impl Signer for MockSelectiveSigner {
+        fn generate_keypair(&self) -> Result<KeyPair, CryptoError> {
+            Ok(KeyPair {
+                public_key: vec![5u8; 32],
+                secret_key: vec![6u8; 32],
+            })
+        }
+
+        fn sign(&self, _secret_key: &[u8], message: &[u8]) -> Result<Signature, CryptoError> {
+            let mut sig = b"sig:".to_vec();
+            sig.extend_from_slice(message);
+            Ok(Signature(Bytes::from(sig)))
+        }
+
+        fn verify(
+            &self,
+            _public_key: &[u8],
+            message: &[u8],
+            signature: &Signature,
+        ) -> Result<bool, CryptoError> {
+            let mut expected = b"sig:".to_vec();
+            expected.extend_from_slice(message);
+            Ok(signature.0.as_ref() == expected.as_slice())
+        }
+    }
+
     #[test]
     fn keygen_generate_keypair() -> TestResult {
         let encryptor = MockEncryptor;
@@ -886,6 +914,25 @@ mod tests {
         assert_eq!(signature.0.len(), 64);
         let valid = KeyGenService::verify(&signer, &[0u8; 32], b"test message", &signature)?;
         assert!(valid);
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_verify_invalid_signature_returns_false() -> TestResult {
+        let signer = MockSelectiveSigner;
+        let invalid_signature = Signature(Bytes::from_static(b"sig:wrong message"));
+        let valid =
+            KeyGenService::verify(&signer, &[0u8; 32], b"test message", &invalid_signature)?;
+        assert!(!valid);
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_verify_tampered_message_returns_false() -> TestResult {
+        let signer = MockSelectiveSigner;
+        let signature = KeyGenService::sign(&signer, &[0u8; 32], b"test message")?;
+        let valid = KeyGenService::verify(&signer, &[0u8; 32], b"tampered message", &signature)?;
+        assert!(!valid);
         Ok(())
     }
 

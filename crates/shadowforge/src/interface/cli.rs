@@ -26,7 +26,7 @@ pub enum Commands {
     /// Print version and git SHA.
     Version,
 
-    /// Generate a key pair.
+    /// Key generation and signing operations.
     Keygen(KeygenArgs),
 
     /// Embed a payload into a cover medium.
@@ -161,12 +161,44 @@ pub enum ArchiveFormat {
 /// Arguments for `keygen`.
 #[derive(Parser, Debug)]
 pub struct KeygenArgs {
+    /// Keygen sub-operation.
+    #[command(subcommand)]
+    pub subcmd: Option<KeygenSubcommand>,
     /// Algorithm to use.
     #[arg(long, value_enum)]
-    pub algorithm: Algorithm,
+    pub algorithm: Option<Algorithm>,
     /// Output directory for key files.
     #[arg(long)]
-    pub output: PathBuf,
+    pub output: Option<PathBuf>,
+}
+
+/// `keygen` sub-operations.
+#[derive(Subcommand, Debug)]
+pub enum KeygenSubcommand {
+    /// Sign an input file with an ML-DSA secret key.
+    Sign {
+        /// Input file to sign.
+        #[arg(long)]
+        input: PathBuf,
+        /// Secret signing key file.
+        #[arg(long)]
+        secret_key: PathBuf,
+        /// Output detached signature file.
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Verify a detached signature with an ML-DSA public key.
+    Verify {
+        /// Signed input file.
+        #[arg(long)]
+        input: PathBuf,
+        /// Public verification key file.
+        #[arg(long)]
+        public_key: PathBuf,
+        /// Detached signature file.
+        #[arg(long)]
+        signature: PathBuf,
+    },
 }
 
 /// Arguments for `embed`.
@@ -571,6 +603,38 @@ mod tests {
             "kyber1024",
             "--output",
             "/tmp/keys",
+        ]);
+        assert!(cli.is_ok());
+    }
+
+    #[test]
+    fn cli_parse_keygen_sign() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "keygen",
+            "sign",
+            "--input",
+            "payload.bin",
+            "--secret-key",
+            "secret.key",
+            "--output",
+            "payload.sig",
+        ]);
+        assert!(cli.is_ok());
+    }
+
+    #[test]
+    fn cli_parse_keygen_verify() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "keygen",
+            "verify",
+            "--input",
+            "payload.bin",
+            "--public-key",
+            "public.key",
+            "--signature",
+            "payload.sig",
         ]);
         assert!(cli.is_ok());
     }
