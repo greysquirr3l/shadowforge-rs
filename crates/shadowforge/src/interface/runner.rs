@@ -775,7 +775,9 @@ fn cmd_corpus(args: &cli::CorpusArgs) -> Result<(), AppError> {
             let payload = Payload::from_bytes(data);
             let tech = resolve_technique(*technique);
 
-            // If --model is provided, use model-aware search.
+            // If --model is provided, use model-aware search.  --resolution
+            // is required in that case; an absent or unparseable value returns
+            // a clear error rather than silently falling back to (0, 0).
             let results = if let Some(model_id) = model {
                 let res = resolution
                     .as_deref()
@@ -785,7 +787,13 @@ fn cmd_corpus(args: &cli::CorpusArgs) -> Result<(), AppError> {
                         let h = parts.next()?.parse::<u32>().ok()?;
                         Some((w, h))
                     })
-                    .unwrap_or((0, 0));
+                    .ok_or_else(|| {
+                        AppError::Stego(StegoError::MalformedCoverData {
+                            reason: "--model requires --resolution in WIDTHxHEIGHT format \
+                                     (e.g. --resolution 1024x1024)"
+                                .to_string(),
+                        })
+                    })?;
                 CorpusService::search_for_model(&index, &payload, model_id, res, *top)?
             } else {
                 CorpusService::search(&index, &payload, tech, *top)?

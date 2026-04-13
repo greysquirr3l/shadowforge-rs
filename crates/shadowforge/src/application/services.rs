@@ -259,43 +259,58 @@ impl DistributeService {
         embedder: &dyn EmbedTechnique,
         deps: &AdaptiveProfileDeps<'_>,
     ) -> Result<Vec<CoverMedia>, AppError> {
-        let prepared_covers: Vec<CoverMedia> = covers
-            .into_iter()
-            .map(|cover| {
-                if let Some(matched) = deps.matcher.profile_for(&cover) {
-                    deps.matcher.apply_profile(cover, &matched)
-                } else {
-                    Ok(cover)
-                }
-            })
-            .collect::<Result<_, _>>()?;
+        // Profile matching (FFT on each cover) is only needed for
+        // Adaptive and CompressionSurvivable profiles; skip it for the
+        // cheaper Standard / CorpusBased paths.
+        let prepared_covers: Vec<CoverMedia> = match profile {
+            EmbeddingProfile::Standard | EmbeddingProfile::CorpusBased => covers,
+            _ => covers
+                .into_iter()
+                .map(|cover| {
+                    if let Some(matched) = deps.matcher.profile_for(&cover) {
+                        deps.matcher.apply_profile(cover, &matched)
+                    } else {
+                        Ok(cover)
+                    }
+                })
+                .collect::<Result<_, _>>()?,
+        };
 
-        let original_covers = prepared_covers.clone();
+        let original_cover_count = prepared_covers.len();
+        // Clone originals only for the Adaptive branch, which needs to pair each
+        // output cover against its source for detectability scoring.
+        let original_covers_opt: Option<Vec<CoverMedia>> = matches!(
+            profile,
+            EmbeddingProfile::Adaptive { .. }
+        )
+        .then(|| prepared_covers.clone());
         let distributed = distributor.distribute(payload, profile, prepared_covers, embedder)?;
 
-        if distributed.len() != original_covers.len() {
-            return Err(AppError::Adaptive(AdaptiveError::ProfileMatchFailed {
-                reason: format!(
-                    "distributed cover count mismatch: got {}, expected {}",
-                    distributed.len(),
-                    original_covers.len()
-                ),
-            }));
+        if distributed.len() != original_cover_count {
+            return Err(AppError::Adaptive(
+                AdaptiveError::DistributionCountMismatch {
+                    got: distributed.len(),
+                    expected: original_cover_count,
+                },
+            ));
         }
 
         match profile {
             EmbeddingProfile::Standard | EmbeddingProfile::CorpusBased => Ok(distributed),
             EmbeddingProfile::Adaptive {
                 max_detectability_db,
-            } => distributed
-                .into_iter()
-                .zip(original_covers.iter())
-                .map(|(stego, original)| {
-                    deps.optimiser
-                        .optimise(stego, original, *max_detectability_db)
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(AppError::from),
+            } => {
+                let original_covers = original_covers_opt.unwrap_or_default();
+                distributed
+                    .into_iter()
+                    .zip(original_covers.into_iter())
+                    .map(|(stego, original)| {
+                        deps.optimiser
+                            .optimise(stego, &original, *max_detectability_db)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(AppError::from)
+            }
             EmbeddingProfile::CompressionSurvivable { platform } => distributed
                 .into_iter()
                 .map(|stego| deps.compressor.simulate(stego, platform))

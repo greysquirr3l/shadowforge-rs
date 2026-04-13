@@ -33,9 +33,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 - **Analysis report extended** — `AnalysisReport` now includes optional
   `spectral_score` alongside existing detectability metrics
-- **Corpus entry enrichment** — corpus indexing now records
-  `CorpusEntry::spectral_key` when generator profile matching succeeds,
-  enabling resolution-matched model bucketing
+- **Corpus entry enrichment** — `CorpusEntry` now carries an optional
+  `spectral_key` field for future generator-aware enrichment; corpus
+  indexing currently sets it to `None` (bucketing is reserved for a
+  future indexing pass)
 
 ### Refactored
 
@@ -48,7 +49,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Testing
 
 - **Spectral/adaptive phase validated** — T36–T40 implementation passed full
-  workspace validation: 430 tests passing, 0 failures, and clippy clean with
+  workspace validation: 453 tests passing, 0 failures, and clippy clean with
   0 warnings
 
 ## [0.2.0] — 2026-04-10

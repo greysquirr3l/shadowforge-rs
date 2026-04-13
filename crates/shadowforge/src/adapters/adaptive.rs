@@ -65,8 +65,16 @@ impl CoverProfileMatcherImpl {
     pub fn with_built_in() -> Self {
         static BUILT_IN: LazyLock<Vec<AiGenProfile>> = LazyLock::new(|| {
             let raw = include_str!("ai_profiles.json");
-            serde_json::from_str::<ProfileCodebook>(raw)
-                .map_or_else(|_| Vec::new(), |book| book.profiles)
+            match serde_json::from_str::<ProfileCodebook>(raw) {
+                Ok(book) => book.profiles,
+                Err(e) => {
+                    tracing::error!(
+                        "built-in AI profile codebook is malformed — \
+                         adaptive matching is disabled: {e}"
+                    );
+                    Vec::new()
+                }
+            }
         });
         Self {
             ai_profiles: BUILT_IN.clone(),
@@ -107,7 +115,7 @@ impl CoverProfileMatcher for CoverProfileMatcherImpl {
             bins.iter()
                 .filter(|b| b.is_strong())
                 .filter(|b| {
-                    let idx = b.freq.1 as usize;
+                    let idx = b.freq.0 as usize * width as usize + b.freq.1 as usize;
                     // Phase within π/8 of expected.
                     freq.get(idx).is_some_and(|c| {
                         let phase_diff = (f64::from(c.arg()) - b.phase).abs();
@@ -125,7 +133,7 @@ impl CoverProfileMatcher for CoverProfileMatcherImpl {
                 .iter()
                 .filter(|b| b.is_strong())
                 .filter(|b| {
-                    let idx = b.freq.1 as usize;
+                    let idx = b.freq.0 as usize * width as usize + b.freq.1 as usize;
                     freq.get(idx).is_some_and(|c| {
                         (f64::from(c.arg()) - b.phase).abs() < std::f64::consts::PI / 8.0
                     })
@@ -210,7 +218,7 @@ impl AdaptiveOptimiser for AdaptiveOptimiserImpl {
 
         let profile = self.matcher.profile_for(&stego);
         let fallback_profile = CoverProfile::Camera(CameraProfile {
-            quantisation_table: vec![],
+            quantisation_table: [0u16; 64],
             noise_floor_db: -80.0,
             model_id: "fallback".to_string(),
         });
@@ -487,7 +495,7 @@ mod tests {
         let matcher = CoverProfileMatcherImpl::with_built_in();
         let cover = make_cover(CoverMediaKind::PngImage, 8, 8);
         let profile = CoverProfile::Camera(CameraProfile {
-            quantisation_table: vec![0u16; 64],
+            quantisation_table: [0u16; 64],
             noise_floor_db: -80.0,
             model_id: "test".to_string(),
         });

@@ -115,6 +115,61 @@ pub fn chi_square_score(data: &[u8]) -> f64 {
     }
 }
 
+/// Compute a pair-delta chi-square score on `data`.
+///
+/// Builds a 256-bin histogram of consecutive byte differences
+/// `data[i+1].wrapping_sub(data[i])` and measures how far that distribution
+/// deviates from the flat prior expected for independent random bytes.
+/// Lower score = less detectable.
+///
+/// Unlike [`chi_square_score`], this score **is** order-sensitive: swapping
+/// two non-adjacent bytes changes the pairs they participate in and therefore
+/// changes the score.  This makes it suitable as the hill-climb objective in
+/// [`crate::domain::adaptive::permutation_search`].
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "pair counts are small enough for f64"
+)]
+pub fn pair_delta_chi_square_score(data: &[u8]) -> f64 {
+    if data.len() < 2 {
+        return 0.0;
+    }
+
+    let mut histogram = [0u64; 256];
+    for pair in data.array_windows::<2>() {
+        let delta = pair[1].wrapping_sub(pair[0]);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "delta is a u8, always 0..=255, histogram has 256 entries"
+        )]
+        {
+            histogram[usize::from(delta)] = histogram[usize::from(delta)].strict_add(1);
+        }
+    }
+
+    let n_pairs = data.len().strict_sub(1);
+    let expected = n_pairs as f64 / 256.0;
+    if expected < f64::EPSILON {
+        return 0.0;
+    }
+
+    let chi_sq: f64 = histogram
+        .iter()
+        .map(|&count| {
+            let diff = count as f64 - expected;
+            (diff * diff) / expected
+        })
+        .sum();
+
+    let normalised = chi_sq / 255.0;
+    if normalised < f64::EPSILON {
+        -100.0
+    } else {
+        10.0 * normalised.log10()
+    }
+}
+
 // ─── Private capacity estimators ──────────────────────────────────────────────
 
 const fn estimate_image_lsb_capacity(cover: &CoverMedia) -> u64 {
@@ -219,12 +274,25 @@ pub fn spectral_detectability_score(
     let orig_freq = run_fft(&orig_pixels, fft_len);
     let stego_freq = run_fft(&stego_pixels, fft_len);
 
-    // Determine image width: try to find a power-of-two width that matches.
-    // For analysis we use fft_len itself as width; height = 1 (1-D DFT).
-    let width = u32::try_from(fft_len).ok().map_or(u32::MAX, |v| v);
-    let height = 1u32;
+    // Extract actual image dimensions from metadata so the carrier-bin
+    // profile lookup (keyed by "WIDTHxHEIGHT") can find the right entry.
+    // Fall back to treating the data as a 1-D signal if dimensions are absent.
+    let img_width: usize = original
+        .metadata
+        .get("width")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(fft_len);
+    let img_height: usize = original
+        .metadata
+        .get("height")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1);
+    let width = u32::try_from(img_width).unwrap_or(u32::MAX);
+    let height = u32::try_from(img_height).unwrap_or(u32::MAX);
 
-    // Determine carrier bins to examine.
+    // Determine carrier bins to examine.  Convert (row, col) 2-D coordinates
+    // to a flat 1-D FFT index so the helpers can index directly into the
+    // FFT output array.
     let carrier_bins: Vec<(u32, u32)> = profile.map_or_else(Vec::new, |prof| {
         prof.carrier_bins_for(width, height)
             .map(|bins| {
@@ -236,21 +304,25 @@ pub fn spectral_detectability_score(
             .unwrap_or_default()
     });
 
-    let carrier_bins: Vec<(usize, usize)> = if carrier_bins.is_empty() {
+    let flat_bins: Vec<usize> = if carrier_bins.is_empty() {
         // Fall back to top-16 highest magnitude bins, skipping DC.
         top_magnitude_bins(&orig_freq, 16)
     } else {
         carrier_bins
             .into_iter()
-            .map(|(r, c)| (r as usize, c as usize))
+            .map(|(r, c)| {
+                (r as usize)
+                    .saturating_mul(img_width)
+                    .saturating_add(c as usize)
+            })
             .collect()
     };
 
     // Phase coherence drop: 1 − avg |cos(Δphase)| over carrier bins.
-    let phase_coherence_drop = compute_phase_coherence_drop(&orig_freq, &stego_freq, &carrier_bins);
+    let phase_coherence_drop = compute_phase_coherence_drop(&orig_freq, &stego_freq, &flat_bins);
 
     // SNR drop in dB.
-    let carrier_snr_drop_db = compute_carrier_snr_drop_db(&orig_freq, &stego_freq, &carrier_bins);
+    let carrier_snr_drop_db = compute_carrier_snr_drop_db(&orig_freq, &stego_freq, &flat_bins);
 
     // Sample-pair adjacency asymmetry on the raw channel.
     let sample_pair_asymmetry = match (orig_pixels.get(..n), stego_pixels.get(..n)) {
@@ -297,9 +369,9 @@ fn run_fft(samples: &[f32], fft_len: usize) -> Vec<Complex<f32>> {
     input
 }
 
-/// Return indices `(0, bin)` of the top-`n` highest-magnitude bins, skipping
-/// DC (index 0).
-fn top_magnitude_bins(freq: &[Complex<f32>], n: usize) -> Vec<(usize, usize)> {
+/// Return flat 1-D FFT bin indices of the top-`n` highest-magnitude bins,
+/// skipping DC (index 0).
+fn top_magnitude_bins(freq: &[Complex<f32>], n: usize) -> Vec<usize> {
     let mut indexed: Vec<(usize, f64)> = freq
         .iter()
         .enumerate()
@@ -308,22 +380,22 @@ fn top_magnitude_bins(freq: &[Complex<f32>], n: usize) -> Vec<(usize, usize)> {
         .collect();
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     indexed.truncate(n);
-    indexed.into_iter().map(|(i, _)| (0usize, i)).collect()
+    indexed.into_iter().map(|(i, _)| i).collect()
 }
 
-/// `1 - avg(|cos(phase_stego - phase_orig)|)` over the given bins.
+/// `1 - avg(|cos(phase_stego - phase_orig)|)` over the given flat bin indices.
 fn compute_phase_coherence_drop(
     orig: &[Complex<f32>],
     stego: &[Complex<f32>],
-    bins: &[(usize, usize)],
+    bins: &[usize],
 ) -> f64 {
     if bins.is_empty() {
         return 0.0;
     }
     let mut sum = 0.0f64;
     let mut count = 0usize;
-    for &(_row, col) in bins {
-        if let (Some(o), Some(s)) = (orig.get(col), stego.get(col)) {
+    for &idx in bins {
+        if let (Some(o), Some(s)) = (orig.get(idx), stego.get(idx)) {
             let phase_diff = f64::from(s.arg() - o.arg());
             sum += phase_diff.cos().abs();
             count = count.strict_add(1);
@@ -345,15 +417,15 @@ fn compute_phase_coherence_drop(
 fn compute_carrier_snr_drop_db(
     orig: &[Complex<f32>],
     stego: &[Complex<f32>],
-    bins: &[(usize, usize)],
+    bins: &[usize],
 ) -> f64 {
     if bins.is_empty() {
         return 0.0;
     }
     let mut sum = 0.0f64;
     let mut count = 0usize;
-    for &(_row, col) in bins {
-        if let (Some(o), Some(s)) = (orig.get(col), stego.get(col)) {
+    for &idx in bins {
+        if let (Some(o), Some(s)) = (orig.get(idx), stego.get(idx)) {
             let mag_orig = f64::from(o.norm());
             let mag_stego = f64::from(s.norm());
             if mag_orig > 0.0 && mag_stego > 0.0 {
