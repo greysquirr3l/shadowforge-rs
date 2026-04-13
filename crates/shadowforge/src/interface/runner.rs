@@ -434,6 +434,38 @@ fn cmd_extract_distributed(args: &cli::ExtractDistributedArgs) -> Result<(), App
 
 // ─── Analyse ──────────────────────────────────────────────────────────────────
 
+/// Format an `AnalysisReport` as a human-readable string.
+/// Exposed for unit testing.
+pub(crate) fn format_analysis_report(report: &crate::domain::types::AnalysisReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Technique:     {:?}", report.technique);
+    let _ = writeln!(out, "Capacity:      {} bytes", report.cover_capacity.bytes);
+    let _ = writeln!(out, "Chi-square:    {:.2} dB", report.chi_square_score);
+    let _ = writeln!(out, "Risk:          {:?}", report.detectability_risk);
+    let _ = writeln!(
+        out,
+        "Recommended:   {} bytes",
+        report.recommended_max_payload_bytes
+    );
+    if let Some(s) = &report.spectral_score {
+        let _ = writeln!(out, "--- Spectral Detectability ---");
+        let _ = writeln!(out, "  Phase coherence drop: {:.4}", s.phase_coherence_drop);
+        let _ = writeln!(
+            out,
+            "  Carrier SNR drop:     {:.2} dB",
+            s.carrier_snr_drop_db
+        );
+        let _ = writeln!(
+            out,
+            "  Sample-pair asymmetry:{:.4}",
+            s.sample_pair_asymmetry
+        );
+        let _ = writeln!(out, "  Spectral risk:        {:?}", s.combined_risk);
+    }
+    out
+}
+
 fn cmd_analyse(args: &cli::AnalyseArgs) -> Result<(), AppError> {
     let technique = resolve_technique(args.technique);
     let cover = load_cover_from_path(&args.cover, technique)?;
@@ -448,14 +480,7 @@ fn cmd_analyse(args: &cli::AnalyseArgs) -> Result<(), AppError> {
         })?;
         println!("{json}");
     } else {
-        println!("Technique:     {:?}", report.technique);
-        println!("Capacity:      {} bytes", report.cover_capacity.bytes);
-        println!("Chi-square:    {:.2} dB", report.chi_square_score);
-        println!("Risk:          {:?}", report.detectability_risk);
-        println!(
-            "Recommended:   {} bytes",
-            report.recommended_max_payload_bytes
-        );
+        print!("{}", format_analysis_report(&report));
     }
     Ok(())
 }
@@ -1419,5 +1444,80 @@ mod tests {
         let extracted = fs::read(output_path)?;
         assert_eq!(extracted, b"real secret");
         Ok(())
+    }
+
+    // ─── format_analysis_report ───────────────────────────────────────────
+
+    use super::format_analysis_report;
+    use crate::domain::types::{
+        AnalysisReport, Capacity, DetectabilityRisk, SpectralScore, StegoTechnique as ST,
+    };
+
+    fn base_report() -> AnalysisReport {
+        AnalysisReport {
+            technique: ST::LsbImage,
+            cover_capacity: Capacity {
+                bytes: 1024,
+                technique: ST::LsbImage,
+            },
+            chi_square_score: 3.14,
+            detectability_risk: DetectabilityRisk::Low,
+            recommended_max_payload_bytes: 512,
+            spectral_score: None,
+        }
+    }
+
+    #[test]
+    fn format_report_contains_core_fields() {
+        let report = base_report();
+        let out = format_analysis_report(&report);
+        assert!(out.contains("LsbImage"), "technique should appear");
+        assert!(out.contains("1024 bytes"), "capacity should appear");
+        assert!(out.contains("3.14 dB"), "chi-square should appear");
+        assert!(out.contains("Low"), "risk should appear");
+        assert!(out.contains("512 bytes"), "recommended max should appear");
+    }
+
+    #[test]
+    fn format_report_omits_spectral_section_when_none() {
+        let report = base_report();
+        let out = format_analysis_report(&report);
+        assert!(
+            !out.contains("Spectral Detectability"),
+            "spectral section must be absent when score is None"
+        );
+    }
+
+    #[test]
+    fn format_report_includes_spectral_section_when_present() {
+        let mut report = base_report();
+        report.spectral_score = Some(SpectralScore {
+            phase_coherence_drop: 0.1234,
+            carrier_snr_drop_db: -2.5,
+            sample_pair_asymmetry: 0.0081,
+            combined_risk: DetectabilityRisk::Medium,
+        });
+        let out = format_analysis_report(&report);
+        assert!(
+            out.contains("Spectral Detectability"),
+            "section header must appear"
+        );
+        assert!(out.contains("0.1234"), "phase coherence drop should appear");
+        assert!(out.contains("-2.50 dB"), "SNR drop should appear");
+        assert!(
+            out.contains("0.0081"),
+            "sample-pair asymmetry should appear"
+        );
+        assert!(out.contains("Medium"), "spectral risk should appear");
+    }
+
+    #[test]
+    fn format_report_spectral_does_not_bleed_into_core_output() {
+        let report = base_report();
+        let out = format_analysis_report(&report);
+        // Core fields still present even without spectral score
+        assert!(out.contains("Technique"));
+        assert!(out.contains("Chi-square"));
+        assert!(out.contains("Recommended"));
     }
 }
