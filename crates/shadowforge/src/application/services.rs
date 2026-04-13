@@ -15,15 +15,17 @@ use crate::domain::errors::{
     ScrubberError, StegoError, TimeLockError,
 };
 use crate::domain::ports::{
-    AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort, CapacityAnalyser,
-    DeadDropEncoder, DeniableEmbedder, Distributor, EmbedTechnique, Encryptor, ExtractTechnique,
-    ForensicWatermarker, PanicWiper, Reconstructor, Signer, StyloScrubber,
-    TimeLockService as TimeLockServicePort,
+    AdaptiveOptimiser, AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort,
+    CapacityAnalyser, CompressionSimulator, CorpusIndex, CoverProfileMatcher, DeadDropEncoder,
+    DeniableEmbedder, Distributor, EmbedTechnique, Encryptor, ExtractTechnique,
+    ForensicWatermarker, GeographicDistributor, PanicWiper, Reconstructor, Signer, StyloScrubber,
+    SymmetricCipher, TimeLockService as TimeLockServicePort,
 };
 use crate::domain::types::{
-    AnalysisReport, ArchiveFormat, CanaryShard, CoverMedia, DeniableKeySet, DeniablePayloadPair,
-    EmbeddingProfile, KeyPair, PanicWipeConfig, Payload, PlatformProfile, Signature,
-    StegoTechnique, StyloProfile, TimeLockPuzzle, WatermarkReceipt, WatermarkTripwireTag,
+    AnalysisReport, ArchiveFormat, CanaryShard, CorpusEntry, CoverMedia, DeniableKeySet,
+    DeniablePayloadPair, EmbeddingProfile, GeographicManifest, KeyPair, PanicWipeConfig, Payload,
+    PlatformProfile, Signature, SpectralKey, StegoTechnique, StyloProfile, TimeLockPuzzle,
+    WatermarkReceipt, WatermarkTripwireTag,
 };
 
 // ─── AppError ─────────────────────────────────────────────────────────────────
@@ -163,7 +165,50 @@ impl KeyGenService {
     }
 }
 
+// ─── CipherService ───────────────────────────────────────────────────────────
+
+/// AES-256-GCM encrypt / decrypt orchestrator.
+pub struct CipherService;
+
+impl CipherService {
+    /// Encrypt `plaintext` with `key` and `nonce`.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Crypto`] on encryption failure.
+    pub fn encrypt(
+        cipher: &dyn SymmetricCipher,
+        key: &[u8],
+        nonce: &[u8],
+        plaintext: &[u8],
+    ) -> Result<Bytes, AppError> {
+        Ok(cipher.encrypt(key, nonce, plaintext)?)
+    }
+
+    /// Decrypt and authenticate `ciphertext` with `key` and `nonce`.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Crypto`] on decryption or authentication failure.
+    pub fn decrypt(
+        cipher: &dyn SymmetricCipher,
+        key: &[u8],
+        nonce: &[u8],
+        ciphertext: &[u8],
+    ) -> Result<Bytes, AppError> {
+        Ok(cipher.decrypt(key, nonce, ciphertext)?)
+    }
+}
+
 // ─── DistributeService ────────────────────────────────────────────────────────
+
+/// Dependencies for profile-specific hardening during distribution.
+pub struct AdaptiveProfileDeps<'a> {
+    /// Cover profile matcher dependency.
+    pub matcher: &'a dyn CoverProfileMatcher,
+    /// Adaptive optimiser dependency.
+    pub optimiser: &'a dyn AdaptiveOptimiser,
+    /// Compression simulator dependency.
+    pub compressor: &'a dyn CompressionSimulator,
+}
 
 /// Distribute a payload across multiple covers.
 pub struct DistributeService;
@@ -181,6 +226,94 @@ impl DistributeService {
         embedder: &dyn EmbedTechnique,
     ) -> Result<Vec<CoverMedia>, AppError> {
         Ok(distributor.distribute(payload, profile, covers, embedder)?)
+    }
+
+    /// Distribute `payload` across `covers` with a geographic manifest.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Opsec`] on manifest/distribution failures.
+    pub fn distribute_with_geographic_manifest(
+        payload: &Payload,
+        covers: Vec<CoverMedia>,
+        manifest: &GeographicManifest,
+        embedder: &dyn EmbedTechnique,
+        distributor: &dyn GeographicDistributor,
+    ) -> Result<Vec<CoverMedia>, AppError> {
+        Ok(distributor.distribute_with_manifest(payload, covers, manifest, embedder)?)
+    }
+
+    /// Distribute and apply profile-specific adaptive hardening.
+    ///
+    /// For `Adaptive`, each output cover is optimised against its source cover.
+    /// For `CompressionSurvivable`, each output cover is passed through platform
+    /// recompression simulation.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Distribution`] for distribution failures and
+    /// [`AppError::Adaptive`] for adaptive/profile hardening failures.
+    pub fn distribute_with_profile_hardening(
+        payload: &Payload,
+        covers: Vec<CoverMedia>,
+        profile: &EmbeddingProfile,
+        distributor: &dyn Distributor,
+        embedder: &dyn EmbedTechnique,
+        deps: &AdaptiveProfileDeps<'_>,
+    ) -> Result<Vec<CoverMedia>, AppError> {
+        // Profile matching (FFT on each cover) is only needed for
+        // Adaptive and CompressionSurvivable profiles; skip it for the
+        // cheaper Standard / CorpusBased paths.
+        let prepared_covers: Vec<CoverMedia> = match profile {
+            EmbeddingProfile::Standard | EmbeddingProfile::CorpusBased => covers,
+            _ => covers
+                .into_iter()
+                .map(|cover| {
+                    if let Some(matched) = deps.matcher.profile_for(&cover) {
+                        deps.matcher.apply_profile(cover, &matched)
+                    } else {
+                        Ok(cover)
+                    }
+                })
+                .collect::<Result<_, _>>()?,
+        };
+
+        let original_cover_count = prepared_covers.len();
+        // Clone originals only for the Adaptive branch, which needs to pair each
+        // output cover against its source for detectability scoring.
+        let original_covers_opt: Option<Vec<CoverMedia>> =
+            matches!(profile, EmbeddingProfile::Adaptive { .. }).then(|| prepared_covers.clone());
+        let distributed = distributor.distribute(payload, profile, prepared_covers, embedder)?;
+
+        if distributed.len() != original_cover_count {
+            return Err(AppError::Adaptive(
+                AdaptiveError::DistributionCountMismatch {
+                    got: distributed.len(),
+                    expected: original_cover_count,
+                },
+            ));
+        }
+
+        match profile {
+            EmbeddingProfile::Standard | EmbeddingProfile::CorpusBased => Ok(distributed),
+            EmbeddingProfile::Adaptive {
+                max_detectability_db,
+            } => {
+                let original_covers = original_covers_opt.unwrap_or_default();
+                distributed
+                    .into_iter()
+                    .zip(original_covers)
+                    .map(|(stego, original)| {
+                        deps.optimiser
+                            .optimise(stego, &original, *max_detectability_db)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(AppError::from)
+            }
+            EmbeddingProfile::CompressionSurvivable { platform } => distributed
+                .into_iter()
+                .map(|stego| deps.compressor.simulate(stego, platform))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(AppError::from),
+        }
     }
 }
 
@@ -460,13 +593,65 @@ impl PanicWipeService {
     }
 }
 
+// ─── CorpusService ───────────────────────────────────────────────────────────
+
+/// Corpus index and cover-selection orchestrator.
+pub struct CorpusService;
+
+impl CorpusService {
+    /// Build the corpus index from a directory tree.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Corpus`] on failure.
+    pub fn build_index(
+        index: &dyn CorpusIndex,
+        corpus_dir: &std::path::Path,
+    ) -> Result<usize, AppError> {
+        Ok(index.build_index(corpus_dir)?)
+    }
+
+    /// Search the index for covers that best encode `payload` using `technique`.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Corpus`] on failure.
+    pub fn search(
+        index: &dyn CorpusIndex,
+        payload: &Payload,
+        technique: StegoTechnique,
+        max_results: usize,
+    ) -> Result<Vec<CorpusEntry>, AppError> {
+        Ok(index.search(payload, technique, max_results)?)
+    }
+
+    /// Search the index restricted to a specific camera model and resolution.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Corpus`] on failure.
+    pub fn search_for_model(
+        index: &dyn CorpusIndex,
+        payload: &Payload,
+        model_id: &str,
+        resolution: (u32, u32),
+        max_results: usize,
+    ) -> Result<Vec<CorpusEntry>, AppError> {
+        Ok(index.search_for_model(payload, model_id, resolution, max_results)?)
+    }
+
+    /// Return per-model/resolution entry counts from the index.
+    pub fn model_stats(index: &dyn CorpusIndex) -> Vec<(SpectralKey, usize)> {
+        index.model_stats()
+    }
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::{Capacity, CoverMediaKind, Shard};
+    use crate::domain::types::{Capacity, CoverMediaKind, GeoShardEntry, Shard};
     use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use uuid::Uuid;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -702,6 +887,34 @@ mod tests {
         }
     }
 
+    struct MockSelectiveSigner;
+
+    impl Signer for MockSelectiveSigner {
+        fn generate_keypair(&self) -> Result<KeyPair, CryptoError> {
+            Ok(KeyPair {
+                public_key: vec![5u8; 32],
+                secret_key: vec![6u8; 32],
+            })
+        }
+
+        fn sign(&self, _secret_key: &[u8], message: &[u8]) -> Result<Signature, CryptoError> {
+            let mut sig = b"sig:".to_vec();
+            sig.extend_from_slice(message);
+            Ok(Signature(Bytes::from(sig)))
+        }
+
+        fn verify(
+            &self,
+            _public_key: &[u8],
+            message: &[u8],
+            signature: &Signature,
+        ) -> Result<bool, CryptoError> {
+            let mut expected = b"sig:".to_vec();
+            expected.extend_from_slice(message);
+            Ok(signature.0.as_ref() == expected.as_slice())
+        }
+    }
+
     #[test]
     fn keygen_generate_keypair() -> TestResult {
         let encryptor = MockEncryptor;
@@ -730,6 +943,25 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn keygen_verify_invalid_signature_returns_false() -> TestResult {
+        let signer = MockSelectiveSigner;
+        let invalid_signature = Signature(Bytes::from_static(b"sig:wrong message"));
+        let valid =
+            KeyGenService::verify(&signer, &[0u8; 32], b"test message", &invalid_signature)?;
+        assert!(!valid);
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_verify_tampered_message_returns_false() -> TestResult {
+        let signer = MockSelectiveSigner;
+        let signature = KeyGenService::sign(&signer, &[0u8; 32], b"test message")?;
+        let valid = KeyGenService::verify(&signer, &[0u8; 32], b"tampered message", &signature)?;
+        assert!(!valid);
+        Ok(())
+    }
+
     // ─── DistributeService ────────────────────────────────────────────────
 
     struct MockDistributor;
@@ -746,6 +978,20 @@ mod tests {
         }
     }
 
+    struct MockGeographicDistributor;
+
+    impl GeographicDistributor for MockGeographicDistributor {
+        fn distribute_with_manifest(
+            &self,
+            _payload: &Payload,
+            covers: Vec<CoverMedia>,
+            _manifest: &GeographicManifest,
+            _embedder: &dyn EmbedTechnique,
+        ) -> Result<Vec<CoverMedia>, OpsecError> {
+            Ok(covers)
+        }
+    }
+
     #[test]
     fn distribute_service_returns_covers() -> TestResult {
         let payload = Payload::from_bytes(b"payload".to_vec());
@@ -756,6 +1002,177 @@ mod tests {
         let result =
             DistributeService::distribute(&payload, covers, &profile, &distributor, &embedder)?;
         assert_eq!(result.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn distribute_service_geographic_manifest_returns_covers() -> TestResult {
+        let payload = Payload::from_bytes(b"payload".to_vec());
+        let covers = vec![make_cover(64), make_cover(64)];
+        let manifest = GeographicManifest {
+            shards: vec![GeoShardEntry {
+                shard_index: 0,
+                jurisdiction: "US".to_string(),
+                holder_description: "test holder".to_string(),
+            }],
+            minimum_jurisdictions: 1,
+        };
+        let distributor = MockGeographicDistributor;
+        let embedder = MockEmbedder;
+
+        let result = DistributeService::distribute_with_geographic_manifest(
+            &payload,
+            covers,
+            &manifest,
+            &embedder,
+            &distributor,
+        )?;
+        assert_eq!(result.len(), 2);
+        Ok(())
+    }
+
+    struct MockCoverProfileMatcher {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl CoverProfileMatcher for MockCoverProfileMatcher {
+        fn profile_for(&self, _cover: &CoverMedia) -> Option<crate::domain::ports::CoverProfile> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+
+        fn apply_profile(
+            &self,
+            cover: CoverMedia,
+            _profile: &crate::domain::ports::CoverProfile,
+        ) -> Result<CoverMedia, AdaptiveError> {
+            Ok(cover)
+        }
+    }
+
+    struct MockAdaptiveOptimiser {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl AdaptiveOptimiser for MockAdaptiveOptimiser {
+        fn optimise(
+            &self,
+            stego: CoverMedia,
+            _original: &CoverMedia,
+            _target_db: f64,
+        ) -> Result<CoverMedia, AdaptiveError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Ok(stego)
+        }
+    }
+
+    struct MockCompressionSimulator {
+        simulate_calls: Arc<AtomicUsize>,
+    }
+
+    impl CompressionSimulator for MockCompressionSimulator {
+        fn simulate(
+            &self,
+            cover: CoverMedia,
+            _platform: &PlatformProfile,
+        ) -> Result<CoverMedia, AdaptiveError> {
+            self.simulate_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(cover)
+        }
+
+        fn survivable_capacity(
+            &self,
+            cover: &CoverMedia,
+            _platform: &PlatformProfile,
+        ) -> Result<Capacity, AdaptiveError> {
+            Ok(Capacity {
+                bytes: cover.data.len() as u64,
+                technique: StegoTechnique::LsbImage,
+            })
+        }
+    }
+
+    #[test]
+    fn distribute_with_profile_hardening_uses_optimiser_for_adaptive() -> TestResult {
+        let payload = Payload::from_bytes(b"payload".to_vec());
+        let covers = vec![make_cover(64), make_cover(64)];
+        let profile = EmbeddingProfile::Adaptive {
+            max_detectability_db: -12.0,
+        };
+        let distributor = MockDistributor;
+        let embedder = MockEmbedder;
+        let matcher_calls = Arc::new(AtomicUsize::new(0));
+        let optimiser_calls = Arc::new(AtomicUsize::new(0));
+        let simulator_calls = Arc::new(AtomicUsize::new(0));
+        let matcher = MockCoverProfileMatcher {
+            calls: Arc::clone(&matcher_calls),
+        };
+        let optimiser = MockAdaptiveOptimiser {
+            calls: Arc::clone(&optimiser_calls),
+        };
+        let compressor = MockCompressionSimulator {
+            simulate_calls: Arc::clone(&simulator_calls),
+        };
+
+        let result = DistributeService::distribute_with_profile_hardening(
+            &payload,
+            covers,
+            &profile,
+            &distributor,
+            &embedder,
+            &AdaptiveProfileDeps {
+                matcher: &matcher,
+                optimiser: &optimiser,
+                compressor: &compressor,
+            },
+        )?;
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(matcher_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(optimiser_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(simulator_calls.load(Ordering::Relaxed), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn distribute_with_profile_hardening_uses_simulator_for_survivable() -> TestResult {
+        let payload = Payload::from_bytes(b"payload".to_vec());
+        let covers = vec![make_cover(64), make_cover(64), make_cover(64)];
+        let profile = EmbeddingProfile::CompressionSurvivable {
+            platform: PlatformProfile::Instagram,
+        };
+        let distributor = MockDistributor;
+        let embedder = MockEmbedder;
+        let matcher_calls = Arc::new(AtomicUsize::new(0));
+        let optimiser_calls = Arc::new(AtomicUsize::new(0));
+        let simulator_calls = Arc::new(AtomicUsize::new(0));
+        let matcher = MockCoverProfileMatcher {
+            calls: Arc::clone(&matcher_calls),
+        };
+        let optimiser = MockAdaptiveOptimiser {
+            calls: Arc::clone(&optimiser_calls),
+        };
+        let compressor = MockCompressionSimulator {
+            simulate_calls: Arc::clone(&simulator_calls),
+        };
+
+        let result = DistributeService::distribute_with_profile_hardening(
+            &payload,
+            covers,
+            &profile,
+            &distributor,
+            &embedder,
+            &AdaptiveProfileDeps {
+                matcher: &matcher,
+                optimiser: &optimiser,
+                compressor: &compressor,
+            },
+        )?;
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(matcher_calls.load(Ordering::Relaxed), 3);
+        assert_eq!(optimiser_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(simulator_calls.load(Ordering::Relaxed), 3);
         Ok(())
     }
 
@@ -1175,5 +1592,155 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("crypto"));
         assert!(msg.contains("oops"));
+    }
+
+    // ─── CorpusService ────────────────────────────────────────────────────
+
+    struct MockCorpusIndex {
+        build_count: usize,
+        search_entries: Vec<CorpusEntry>,
+    }
+
+    impl MockCorpusIndex {
+        fn new(build_count: usize, search_entries: Vec<CorpusEntry>) -> Self {
+            Self {
+                build_count,
+                search_entries,
+            }
+        }
+    }
+
+    impl crate::domain::ports::CorpusIndex for MockCorpusIndex {
+        fn build_index(
+            &self,
+            _dir: &std::path::Path,
+        ) -> Result<usize, crate::domain::errors::CorpusError> {
+            Ok(self.build_count)
+        }
+        fn add_to_index(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<CorpusEntry, crate::domain::errors::CorpusError> {
+            Ok(CorpusEntry {
+                file_hash: [0u8; 32],
+                path: path.to_string_lossy().into_owned(),
+                cover_kind: CoverMediaKind::PngImage,
+                precomputed_bit_pattern: bytes::Bytes::new(),
+                spectral_key: None,
+            })
+        }
+        fn search(
+            &self,
+            _payload: &Payload,
+            _technique: StegoTechnique,
+            _max: usize,
+        ) -> Result<Vec<CorpusEntry>, crate::domain::errors::CorpusError> {
+            Ok(self.search_entries.clone())
+        }
+        fn search_for_model(
+            &self,
+            _payload: &Payload,
+            _model_id: &str,
+            _res: (u32, u32),
+            _max: usize,
+        ) -> Result<Vec<CorpusEntry>, crate::domain::errors::CorpusError> {
+            Ok(self.search_entries.clone())
+        }
+        fn model_stats(&self) -> Vec<(SpectralKey, usize)> {
+            vec![(
+                SpectralKey {
+                    model_id: "test-model".into(),
+                    resolution: (1920, 1080),
+                },
+                self.build_count,
+            )]
+        }
+    }
+
+    fn make_corpus_entry(path: &str) -> CorpusEntry {
+        CorpusEntry {
+            file_hash: [0u8; 32],
+            path: path.to_owned(),
+            cover_kind: CoverMediaKind::PngImage,
+            precomputed_bit_pattern: bytes::Bytes::new(),
+            spectral_key: None,
+        }
+    }
+
+    #[test]
+    fn corpus_service_build_index() -> TestResult {
+        let idx = MockCorpusIndex::new(42, vec![]);
+        let count = CorpusService::build_index(&idx, std::path::Path::new("/some/dir"))?;
+        assert_eq!(count, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_service_search() -> TestResult {
+        let entry = make_corpus_entry("covers/img001.png");
+        let idx = MockCorpusIndex::new(1, vec![entry.clone()]);
+        let payload = Payload::from_bytes(bytes::Bytes::from_static(b"hello"));
+        let results = CorpusService::search(&idx, &payload, StegoTechnique::LsbImage, 5)?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results.first().map(|it| it.path.as_str()),
+            Some(entry.path.as_str())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_service_search_for_model() -> TestResult {
+        let entry = make_corpus_entry("covers/gemini001.png");
+        let idx = MockCorpusIndex::new(1, vec![entry.clone()]);
+        let payload = Payload::from_bytes(bytes::Bytes::from_static(b"hello"));
+        let results = CorpusService::search_for_model(&idx, &payload, "gemini", (1920, 1080), 3)?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results.first().map(|it| it.path.as_str()),
+            Some(entry.path.as_str())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_service_model_stats() {
+        let idx = MockCorpusIndex::new(7, vec![]);
+        let stats = CorpusService::model_stats(&idx);
+        assert_eq!(stats.len(), 1);
+        assert_eq!(
+            stats.first().map(|(k, _)| k.model_id.as_str()),
+            Some("test-model")
+        );
+        assert_eq!(stats.first().map(|(_, c)| *c), Some(7));
+    }
+
+    // ─── CipherService ────────────────────────────────────────────────────
+
+    #[test]
+    fn cipher_service_encrypt_decrypt_roundtrip() -> TestResult {
+        use crate::adapters::crypto::Aes256GcmCipher;
+        let cipher = Aes256GcmCipher;
+        let key = vec![0u8; 32];
+        let nonce = vec![1u8; 12];
+        let plaintext = b"secret cipher payload";
+        let ct = CipherService::encrypt(&cipher, &key, &nonce, plaintext)?;
+        let pt = CipherService::decrypt(&cipher, &key, &nonce, &ct)?;
+        assert_eq!(pt.as_ref(), plaintext);
+        Ok(())
+    }
+
+    #[test]
+    fn cipher_service_decrypt_fails_on_tamper() -> TestResult {
+        use crate::adapters::crypto::Aes256GcmCipher;
+        let cipher = Aes256GcmCipher;
+        let key = vec![0u8; 32];
+        let nonce = vec![1u8; 12];
+        let plaintext = b"secret cipher payload";
+        let mut ct = CipherService::encrypt(&cipher, &key, &nonce, plaintext)?.to_vec();
+        *ct.get_mut(0).ok_or("empty ciphertext")? ^= 0xFF;
+        let result = CipherService::decrypt(&cipher, &key, &nonce, &ct);
+        assert!(result.is_err(), "tampered ciphertext must fail decryption");
+        Ok(())
     }
 }

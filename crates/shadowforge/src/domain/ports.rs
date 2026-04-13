@@ -5,11 +5,13 @@
 //! assertions below. No I/O, no `async`, no concrete types from external
 //! crates appear in return positions.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::domain::errors::{
     AdaptiveError, AnalysisError, ArchiveError, CanaryError, CorrectionError, CryptoError,
@@ -337,16 +339,128 @@ pub trait ArchiveHandler {
 
 // ─── Adaptive Embedding ───────────────────────────────────────────────────────
 
+/// Serde helper for `[u16; 64]` — serde only auto-derives array impls up to
+/// `[T; 32]`, so we provide a thin wrapper using `Vec<u16>` as the wire format.
+mod serde_quant_table {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(arr: &[u16; 64], s: S) -> Result<S::Ok, S::Error> {
+        arr.as_slice().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u16; 64], D::Error> {
+        let v = Vec::<u16>::deserialize(d)?;
+        v.as_slice().try_into().map_err(|_| {
+            serde::de::Error::invalid_length(v.len(), &"exactly 64 JPEG quantisation coefficients")
+        })
+    }
+}
+
 /// Camera-model statistical fingerprint — used to defeat model-based
 /// steganalysis by matching the cover's noise floor.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraProfile {
     /// JPEG quantisation table (64 coefficients in zig-zag order).
+    #[serde(with = "serde_quant_table")]
     pub quantisation_table: [u16; 64],
     /// Estimated noise floor of the camera sensor (in decibels).
     pub noise_floor_db: f64,
     /// Human-readable camera model identifier.
     pub model_id: String,
+}
+
+/// Spectral fingerprint for a single AI image generator model.
+///
+/// Stores per-resolution carrier frequency maps extracted from reference
+/// images (pure-black / pure-white outputs dominated by the watermark
+/// signal).  The `carrier_map` key is `"WIDTHxHEIGHT"` (e.g. `"1024x1024"`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiGenProfile {
+    /// Generator identifier, e.g. `"gemini"`, `"midjourney-v7"`.
+    pub model_id: String,
+    /// Per-channel embedding weights `[R, G, B]` (G is reference=1.0).
+    pub channel_weights: [f64; 3],
+    /// Map from `"WxH"` resolution string to carrier bin list.
+    pub carrier_map: HashMap<String, Vec<CarrierBin>>,
+}
+
+impl AiGenProfile {
+    /// Return carrier bins for the given resolution, or `None` if unknown.
+    #[must_use]
+    pub fn carrier_bins_for(&self, width: u32, height: u32) -> Option<&[CarrierBin]> {
+        let key = format!("{width}x{height}");
+        self.carrier_map.get(&key).map(Vec::as_slice)
+    }
+}
+
+/// A single frequency-domain carrier bin occupied by an AI generator's
+/// watermark.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CarrierBin {
+    /// `(row_bin, col_bin)` in the 2-D FFT of the green channel.
+    pub freq: (u32, u32),
+    /// Expected phase angle of the carrier (radians).
+    pub phase: f64,
+    /// Measured phase coherence across reference images, clamped to
+    /// `0.0..=1.0` by the constructor.  The custom deserializer enforces
+    /// the same clamp so untrusted profiles cannot bypass it.
+    #[serde(deserialize_with = "de_clamp_coherence")]
+    coherence: f64,
+}
+
+/// Serde deserializer that clamps a `f64` to `0.0..=1.0`.
+fn de_clamp_coherence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    let v = f64::deserialize(d)?;
+    Ok(v.clamp(0.0, 1.0))
+}
+
+impl CarrierBin {
+    /// Construct a `CarrierBin`, clamping `coherence` to `0.0..=1.0`.
+    #[must_use]
+    pub const fn new(freq: (u32, u32), phase: f64, coherence: f64) -> Self {
+        Self {
+            freq,
+            phase,
+            coherence: coherence.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Return the (clamped) phase coherence value.
+    #[must_use]
+    pub const fn coherence(&self) -> f64 {
+        self.coherence
+    }
+
+    /// Return `true` when coherence ≥ 0.90 — a reliable carrier.
+    #[must_use]
+    pub fn is_strong(&self) -> bool {
+        self.coherence >= 0.90
+    }
+}
+
+/// Discriminated union of cover-source fingerprint profiles.
+///
+/// Use `CoverProfile::Camera` for traditional camera-sourced images and
+/// `CoverProfile::AiGenerator` for AI-generated covers (Gemini, Midjourney,
+/// etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data")]
+pub enum CoverProfile {
+    /// Traditional camera-sourced image (JPEG quant table + sensor noise).
+    Camera(CameraProfile),
+    /// AI-generated image with per-resolution spectral carrier bins.
+    AiGenerator(AiGenProfile),
+}
+
+impl CoverProfile {
+    /// Return the human-readable generator / camera model identifier.
+    #[must_use]
+    pub fn model_id(&self) -> &str {
+        match self {
+            Self::Camera(p) => &p.model_id,
+            Self::AiGenerator(p) => &p.model_id,
+        }
+    }
 }
 
 /// Adversarial embedding optimiser port (STC-inspired).
@@ -368,21 +482,22 @@ pub trait AdaptiveOptimiser {
     ) -> Result<CoverMedia, AdaptiveError>;
 }
 
-/// Camera model fingerprint matching port.
+/// Cover profile matching port — detects whether a cover is AI-generated or
+/// camera-sourced.
 pub trait CoverProfileMatcher {
-    /// Return the best-matching [`CameraProfile`] for `cover`, or `None`
+    /// Return the best-matching [`CoverProfile`] for `cover`, or `None`
     /// if no profile is close enough.
-    fn profile_for(&self, cover: &CoverMedia) -> Option<CameraProfile>;
+    fn profile_for(&self, cover: &CoverMedia) -> Option<CoverProfile>;
 
-    /// Apply `profile` to `cover` to make it statistically match that
-    /// camera model.
+    /// Apply `profile` to `cover` (e.g. adjust JPEG quant tables for a
+    /// camera profile; no-op for AI profiles — we avoid their bins instead).
     ///
     /// # Errors
     /// Returns [`AdaptiveError::ProfileMatchFailed`].
     fn apply_profile(
         &self,
         cover: CoverMedia,
-        profile: &CameraProfile,
+        profile: &CoverProfile,
     ) -> Result<CoverMedia, AdaptiveError>;
 }
 
@@ -670,6 +785,29 @@ pub trait CorpusIndex {
     /// # Errors
     /// Returns [`crate::domain::errors::CorpusError::IndexError`].
     fn build_index(&self, corpus_dir: &Path) -> Result<usize, crate::domain::errors::CorpusError>;
+
+    /// Search the index for covers that match `payload` and have a
+    /// `spectral_key` whose `model_id` and `resolution` match the supplied
+    /// values.
+    ///
+    /// Returns up to `max_results` entries sorted by match quality.
+    ///
+    /// # Errors
+    /// Returns [`crate::domain::errors::CorpusError::NoSuitableCover`] or
+    /// [`crate::domain::errors::CorpusError::IndexError`].
+    fn search_for_model(
+        &self,
+        payload: &Payload,
+        model_id: &str,
+        resolution: (u32, u32),
+        max_results: usize,
+    ) -> Result<Vec<crate::domain::types::CorpusEntry>, crate::domain::errors::CorpusError>;
+
+    /// Return a sorted list of `(SpectralKey, count)` pairs describing how
+    /// many corpus entries are indexed per model/resolution combination.
+    ///
+    /// Using `Vec` instead of `HashMap` to keep the trait object-safe.
+    fn model_stats(&self) -> Vec<(crate::domain::types::SpectralKey, usize)>;
 }
 
 // ─── Object-Safety Assertions ─────────────────────────────────────────────────
@@ -713,5 +851,115 @@ mod object_safety_tests {
         assert_object_safe::<dyn TimeLockService>();
         assert_object_safe::<dyn StyloScrubber>();
         assert_object_safe::<dyn CorpusIndex>();
+    }
+}
+
+#[cfg(test)]
+mod cover_profile_tests {
+    use super::*;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    #[test]
+    fn camera_profile_model_id_via_cover_profile() {
+        let profile = CoverProfile::Camera(CameraProfile {
+            quantisation_table: [0u16; 64],
+            noise_floor_db: -80.0,
+            model_id: "canon-eos-r6".to_string(),
+        });
+        assert_eq!(profile.model_id(), "canon-eos-r6");
+    }
+
+    #[test]
+    fn ai_gen_profile_model_id_via_cover_profile() {
+        let profile = CoverProfile::AiGenerator(AiGenProfile {
+            model_id: "gemini".to_string(),
+            channel_weights: [0.85, 1.0, 0.70],
+            carrier_map: HashMap::new(),
+        });
+        assert_eq!(profile.model_id(), "gemini");
+    }
+
+    #[test]
+    fn carrier_bin_coherence_clamped_above_one() {
+        let bin = CarrierBin::new((9, 9), 0.0, 1.5);
+        assert!((bin.coherence() - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn carrier_bin_coherence_clamped_below_zero() {
+        let bin = CarrierBin::new((9, 9), 0.0, -0.5);
+        assert!((bin.coherence() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn carrier_bin_is_strong_at_exactly_0_90() {
+        let strong = CarrierBin::new((9, 9), 0.0, 0.90);
+        assert!(strong.is_strong());
+    }
+
+    #[test]
+    fn carrier_bin_not_strong_below_0_90() {
+        let weak = CarrierBin::new((9, 9), 0.0, 0.899_999);
+        assert!(!weak.is_strong());
+    }
+
+    #[test]
+    fn ai_gen_profile_carrier_bins_for_known_resolution() {
+        let bins = vec![CarrierBin::new((9, 9), 0.0, 1.0)];
+        let mut carrier_map = HashMap::new();
+        carrier_map.insert("1024x1024".to_string(), bins);
+        let profile = AiGenProfile {
+            model_id: "gemini".to_string(),
+            channel_weights: [0.85, 1.0, 0.70],
+            carrier_map,
+        };
+        assert!(profile.carrier_bins_for(1024, 1024).is_some());
+        assert!(profile.carrier_bins_for(512, 512).is_none());
+    }
+
+    #[test]
+    fn ai_gen_profile_carrier_bins_count() {
+        let bins = vec![
+            CarrierBin::new((9, 9), 0.0, 1.0),
+            CarrierBin::new((5, 5), 0.0, 1.0),
+        ];
+        let mut carrier_map = HashMap::new();
+        carrier_map.insert("1024x1024".to_string(), bins);
+        let profile = AiGenProfile {
+            model_id: "gemini".to_string(),
+            channel_weights: [0.85, 1.0, 0.70],
+            carrier_map,
+        };
+        assert_eq!(
+            profile.carrier_bins_for(1024, 1024).map(<[_]>::len),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn cover_profile_round_trips_through_serde_json() -> TestResult {
+        let profile = CoverProfile::AiGenerator(AiGenProfile {
+            model_id: "gemini".to_string(),
+            channel_weights: [0.85, 1.0, 0.70],
+            carrier_map: HashMap::new(),
+        });
+        let json = serde_json::to_string(&profile)?;
+        let decoded: CoverProfile = serde_json::from_str(&json)?;
+        assert_eq!(decoded.model_id(), "gemini");
+        Ok(())
+    }
+
+    #[test]
+    fn camera_cover_profile_round_trips_through_serde_json() -> TestResult {
+        let profile = CoverProfile::Camera(CameraProfile {
+            quantisation_table: [2u16; 64],
+            noise_floor_db: -75.0,
+            model_id: "nikon-z9".to_string(),
+        });
+        let json = serde_json::to_string(&profile)?;
+        let decoded: CoverProfile = serde_json::from_str(&json)?;
+        assert_eq!(decoded.model_id(), "nikon-z9");
+        Ok(())
     }
 }

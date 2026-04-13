@@ -370,6 +370,14 @@ pub enum AdaptiveError {
         #[source]
         source: StegoError,
     },
+    /// The distributor returned a different number of covers than were supplied.
+    #[error("distribution cover count mismatch: got {got}, expected {expected}")]
+    DistributionCountMismatch {
+        /// Number of covers returned by the distributor.
+        got: usize,
+        /// Number of covers originally supplied.
+        expected: usize,
+    },
 }
 
 // ─── DeniableError ────────────────────────────────────────────────────────────

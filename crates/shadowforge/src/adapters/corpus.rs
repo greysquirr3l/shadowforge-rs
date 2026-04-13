@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::domain::corpus;
 use crate::domain::errors::CorpusError;
 use crate::domain::ports::CorpusIndex;
-use crate::domain::types::{CorpusEntry, CoverMediaKind, Payload, StegoTechnique};
+use crate::domain::types::{CorpusEntry, CoverMediaKind, Payload, SpectralKey, StegoTechnique};
 
 /// In-memory corpus index backed by a `HashMap<file_hash, CorpusEntry>`.
 ///
@@ -20,6 +20,8 @@ use crate::domain::types::{CorpusEntry, CoverMediaKind, Payload, StegoTechnique}
 /// and `build_index`.
 pub struct CorpusIndexImpl {
     entries: RefCell<HashMap<[u8; 32], CorpusEntry>>,
+    /// Spectral key → file hashes for model-aware search.
+    spectral_index: RefCell<HashMap<SpectralKey, Vec<[u8; 32]>>>,
 }
 
 impl CorpusIndexImpl {
@@ -28,6 +30,7 @@ impl CorpusIndexImpl {
     pub fn new() -> Self {
         Self {
             entries: RefCell::new(HashMap::new()),
+            spectral_index: RefCell::new(HashMap::new()),
         }
     }
 
@@ -119,9 +122,12 @@ impl CorpusIndex for CorpusIndexImpl {
             path: path.display().to_string(),
             cover_kind,
             precomputed_bit_pattern: bit_pattern,
+            spectral_key: None,
         };
 
         self.entries.borrow_mut().insert(file_hash, entry.clone());
+        // Spectral key not populated during base indexing (no image decode here).
+        // Callers that have spectral info may insert entries via `add_entry_with_key`.
         Ok(entry)
     }
 
@@ -151,6 +157,74 @@ impl CorpusIndex for CorpusIndexImpl {
         }
 
         Ok(count)
+    }
+
+    fn search_for_model(
+        &self,
+        payload: &Payload,
+        model_id: &str,
+        resolution: (u32, u32),
+        max_results: usize,
+    ) -> Result<Vec<CorpusEntry>, CorpusError> {
+        let key = SpectralKey {
+            model_id: model_id.to_string(),
+            resolution,
+        };
+        let spectral_index = self.spectral_index.borrow();
+        let hashes = spectral_index.get(&key).map_or(&[][..], Vec::as_slice);
+        if hashes.is_empty() {
+            return Err(CorpusError::NoSuitableCover {
+                payload_bytes: payload.len() as u64,
+            });
+        }
+
+        let entries = self.entries.borrow();
+        let payload_pattern = corpus::payload_to_bit_pattern(payload.as_bytes(), None);
+        let mut scored: Vec<(u64, CorpusEntry)> = hashes
+            .iter()
+            .filter_map(|h| entries.get(h))
+            .map(|entry| {
+                let dist = corpus::score_match(&entry.precomputed_bit_pattern, &payload_pattern);
+                (dist, entry.clone())
+            })
+            .collect();
+
+        scored.sort_by_key(|(dist, _)| *dist);
+        scored.truncate(max_results);
+
+        if scored.is_empty() {
+            return Err(CorpusError::NoSuitableCover {
+                payload_bytes: payload.len() as u64,
+            });
+        }
+
+        Ok(scored.into_iter().map(|(_, e)| e).collect())
+    }
+
+    fn model_stats(&self) -> Vec<(SpectralKey, usize)> {
+        let spectral_index = self.spectral_index.borrow();
+        let mut stats: Vec<(SpectralKey, usize)> = spectral_index
+            .iter()
+            .map(|(k, v)| (k.clone(), v.len()))
+            .collect();
+        stats.sort_by(|a, b| a.0.model_id.cmp(&b.0.model_id));
+        stats
+    }
+}
+
+impl CorpusIndexImpl {
+    /// Insert a pre-built [`CorpusEntry`] that already carries a
+    /// [`SpectralKey`].  Used by higher-level pipelines that have already
+    /// decoded the image and run spectral analysis.
+    pub fn add_entry_with_key(&self, entry: CorpusEntry) {
+        if let Some(ref key) = entry.spectral_key {
+            self.spectral_index
+                .borrow_mut()
+                .entry(key.clone())
+                .or_default()
+                .push(entry.file_hash);
+        }
+        self.entries.borrow_mut().insert(entry.file_hash, entry);
     }
 }
 

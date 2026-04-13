@@ -6,6 +6,8 @@
 
 use bytes::Bytes;
 
+use crate::domain::types::CorpusEntry;
+
 /// Compute the Hamming distance between two byte slices of equal length.
 ///
 /// Returns `None` if the slices differ in length.
@@ -97,6 +99,27 @@ pub const fn is_close_match(distance: u64, total_bits: u64) -> bool {
     }
     // ≤ 5% of bits differ
     distance.strict_mul(20) <= total_bits
+}
+
+/// Filter corpus entries by model ID and resolution.
+///
+/// Returns references to all entries whose `spectral_key` matches both
+/// `model_id` and `resolution`. Entries without a `spectral_key` are
+/// silently excluded.
+#[must_use]
+pub fn filter_by_model<'a>(
+    entries: &'a [CorpusEntry],
+    model_id: &str,
+    resolution: (u32, u32),
+) -> Vec<&'a CorpusEntry> {
+    entries
+        .iter()
+        .filter(|e| {
+            e.spectral_key
+                .as_ref()
+                .is_some_and(|k| k.model_id == model_id && k.resolution == resolution)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -197,5 +220,50 @@ mod tests {
     #[test]
     fn is_close_match_zero_total() {
         assert!(!is_close_match(0, 0));
+    }
+
+    // ─── filter_by_model tests ────────────────────────────────────────────────
+
+    fn make_entry(model_id: Option<&str>, resolution: Option<(u32, u32)>) -> CorpusEntry {
+        use crate::domain::types::{CoverMediaKind, SpectralKey};
+        CorpusEntry {
+            file_hash: [0u8; 32],
+            path: "test.png".to_string(),
+            cover_kind: CoverMediaKind::PngImage,
+            precomputed_bit_pattern: Bytes::new(),
+            spectral_key: model_id.zip(resolution).map(|(id, res)| SpectralKey {
+                model_id: id.to_string(),
+                resolution: res,
+            }),
+        }
+    }
+
+    #[test]
+    fn filter_by_model_returns_matching_entries() {
+        let entries = vec![
+            make_entry(Some("gemini"), Some((1024, 1024))),
+            make_entry(Some("gemini"), Some((512, 512))),
+            make_entry(Some("other"), Some((1024, 1024))),
+            make_entry(None, None),
+        ];
+        let result = filter_by_model(&entries, "gemini", (1024, 1024));
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_by_model_returns_empty_when_no_match() {
+        let entries = vec![
+            make_entry(Some("gemini"), Some((512, 512))),
+            make_entry(None, None),
+        ];
+        let result = filter_by_model(&entries, "gemini", (1024, 1024));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_by_model_excludes_no_key_entries() {
+        let entries = vec![make_entry(None, None), make_entry(None, None)];
+        let result = filter_by_model(&entries, "gemini", (1024, 1024));
+        assert!(result.is_empty());
     }
 }

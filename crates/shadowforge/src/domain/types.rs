@@ -190,6 +190,24 @@ pub enum EmbeddingProfile {
     CorpusBased,
 }
 
+/// Maximum detectability budget (dB) used when no explicit value is configured.
+///
+/// Chosen as a conservative threshold that balances stealth and payload
+/// capacity.  A negative value means the stego cover must have *lower* spectral
+/// energy than the original.
+pub const DEFAULT_ADAPTIVE_DETECTABILITY_DB: f64 = -12.0;
+
+impl EmbeddingProfile {
+    /// Return the standard adaptive profile with the default detectability
+    /// budget ([`DEFAULT_ADAPTIVE_DETECTABILITY_DB`]).
+    #[must_use]
+    pub const fn default_adaptive() -> Self {
+        Self::Adaptive {
+            max_detectability_db: DEFAULT_ADAPTIVE_DETECTABILITY_DB,
+        }
+    }
+}
+
 // ─── DistributionPattern ──────────────────────────────────────────────────────
 
 /// How payload shards are distributed across carriers.
@@ -360,6 +378,23 @@ pub enum DetectabilityRisk {
 
 // ─── AnalysisReport ───────────────────────────────────────────────────────────
 
+/// Spectral-domain detectability metrics comparing an original cover to a
+/// stego image.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpectralScore {
+    /// Drop in normalised phase coherence at carrier bins, 0.0–1.0.
+    /// 0.0 = no disruption; 1.0 = complete decoherence.
+    pub phase_coherence_drop: f64,
+    /// Mean SNR drop at carrier bins in dB.  Negative = energy removed
+    /// (less detectable); positive = energy added (more detectable).
+    pub carrier_snr_drop_db: f64,
+    /// Adjacent pixel-pair parity asymmetry, 0.0–1.0.
+    /// 0.0 = balanced pairs; higher = LSB bias in cover.
+    pub sample_pair_asymmetry: f64,
+    /// Qualitative combined risk classification.
+    pub combined_risk: DetectabilityRisk,
+}
+
 /// Steganalysis report for a cover medium.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisReport {
@@ -373,6 +408,9 @@ pub struct AnalysisReport {
     pub detectability_risk: DetectabilityRisk,
     /// Conservative payload size that stays below the detectability threshold.
     pub recommended_max_payload_bytes: u64,
+    /// Spectral-domain score, populated when `spectral_detectability_score`
+    /// is called.  `None` when only the basic chi-square analysis was run.
+    pub spectral_score: Option<SpectralScore>,
 }
 
 // ─── WatermarkReceipt ─────────────────────────────────────────────────────────
@@ -531,7 +569,20 @@ pub struct TimeLockPuzzle {
     pub unlock_at: DateTime<Utc>,
 }
 
-// ─── CorpusEntry ──────────────────────────────────────────────────────────────
+// ─── SpectralKey ────────────────────────────────────────────────────────
+
+/// Spectral fingerprint key for model-aware corpus indexing.
+///
+/// Used as a `HashMap` key so all four standard traits are derived.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SpectralKey {
+    /// Generator model identifier (e.g. `"gemini"`, `"midjourney-v7"`).
+    pub model_id: String,
+    /// Image resolution `(width, height)` matching this profile.
+    pub resolution: (u32, u32),
+}
+
+// ─── CorpusEntry ────────────────────────────────────────────────────────
 
 /// An indexed entry in a local image corpus for zero-modification stego.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -544,6 +595,9 @@ pub struct CorpusEntry {
     pub cover_kind: CoverMediaKind,
     /// Precomputed LSB bit pattern for ANN matching.
     pub precomputed_bit_pattern: Bytes,
+    /// Optional spectral profile key — set when this is an AI-generated image
+    /// identified by [`crate::domain::ports::CoverProfileMatcher`].
+    pub spectral_key: Option<SpectralKey>,
 }
 
 // ─── StyloProfile ─────────────────────────────────────────────────────────────
@@ -750,6 +804,7 @@ mod tests {
             chi_square_score: 0.42,
             detectability_risk: DetectabilityRisk::Low,
             recommended_max_payload_bytes: 512,
+            spectral_score: None,
         };
         let json = serde_json::to_string(&report)?;
         assert!(json.contains("DctJpeg"));
@@ -875,6 +930,7 @@ mod tests {
             path: "images/cover.png".into(),
             cover_kind: CoverMediaKind::PngImage,
             precomputed_bit_pattern: Bytes::from(vec![0u8; 16]),
+            spectral_key: None,
         };
         let json = serde_json::to_string(&entry)?;
         assert!(json.contains("images/cover.png"));
@@ -925,5 +981,76 @@ mod tests {
         };
         let dbg = format!("{config:?}");
         assert!(dbg.contains("key_paths"));
+    }
+
+    #[test]
+    fn spectral_key_round_trips_through_serde_json() -> TestResult {
+        let key = SpectralKey {
+            model_id: "gemini".to_string(),
+            resolution: (1024, 1024),
+        };
+        let json = serde_json::to_string(&key)?;
+        let decoded: SpectralKey = serde_json::from_str(&json)?;
+        assert_eq!(decoded.model_id, "gemini");
+        assert_eq!(decoded.resolution, (1024, 1024));
+        Ok(())
+    }
+
+    #[test]
+    fn spectral_key_usable_as_hashmap_key() {
+        let mut map = std::collections::HashMap::new();
+        let key = SpectralKey {
+            model_id: "gemini".to_string(),
+            resolution: (1024, 1024),
+        };
+        map.insert(key.clone(), 42usize);
+        assert_eq!(map.get(&key), Some(&42));
+    }
+
+    #[test]
+    fn corpus_entry_with_spectral_key_serialises() -> TestResult {
+        let entry = CorpusEntry {
+            file_hash: [0xCC; 32],
+            path: "ai/image.png".into(),
+            cover_kind: CoverMediaKind::PngImage,
+            precomputed_bit_pattern: Bytes::from(vec![0u8; 8]),
+            spectral_key: Some(SpectralKey {
+                model_id: "gemini".to_string(),
+                resolution: (1024, 1024),
+            }),
+        };
+        let json = serde_json::to_string(&entry)?;
+        assert!(json.contains("gemini"));
+        let decoded: CorpusEntry = serde_json::from_str(&json)?;
+        assert!(decoded.spectral_key.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_entry_without_spectral_key_serialises() -> TestResult {
+        let entry = CorpusEntry {
+            file_hash: [0xDD; 32],
+            path: "camera/photo.jpg".into(),
+            cover_kind: CoverMediaKind::JpegImage,
+            precomputed_bit_pattern: Bytes::from(vec![0u8; 8]),
+            spectral_key: None,
+        };
+        let json = serde_json::to_string(&entry)?;
+        let decoded: CorpusEntry = serde_json::from_str(&json)?;
+        assert!(decoded.spectral_key.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn default_adaptive_uses_named_constant() {
+        // The default adaptive profile must encode the canonical threshold so
+        // the runner never hard-codes a magic number.
+        let profile = EmbeddingProfile::default_adaptive();
+        assert!(matches!(
+            profile,
+            EmbeddingProfile::Adaptive {
+                max_detectability_db
+            } if (max_detectability_db - DEFAULT_ADAPTIVE_DETECTABILITY_DB).abs() < f64::EPSILON
+        ));
     }
 }

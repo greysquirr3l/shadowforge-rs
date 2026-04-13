@@ -26,7 +26,7 @@ pub enum Commands {
     /// Print version and git SHA.
     Version,
 
-    /// Generate a key pair.
+    /// Key generation and signing operations.
     Keygen(KeygenArgs),
 
     /// Embed a payload into a cover medium.
@@ -73,6 +73,9 @@ pub enum Commands {
 
     /// Generate shell completions.
     Completions(CompletionsArgs),
+
+    /// Symmetric cipher operations (AES-256-GCM).
+    Cipher(CipherArgs),
 }
 
 // ─── Value enums ──────────────────────────────────────────────────────────────
@@ -158,12 +161,44 @@ pub enum ArchiveFormat {
 /// Arguments for `keygen`.
 #[derive(Parser, Debug)]
 pub struct KeygenArgs {
+    /// Keygen sub-operation.
+    #[command(subcommand)]
+    pub subcmd: Option<KeygenSubcommand>,
     /// Algorithm to use.
     #[arg(long, value_enum)]
-    pub algorithm: Algorithm,
+    pub algorithm: Option<Algorithm>,
     /// Output directory for key files.
     #[arg(long)]
-    pub output: PathBuf,
+    pub output: Option<PathBuf>,
+}
+
+/// `keygen` sub-operations.
+#[derive(Subcommand, Debug)]
+pub enum KeygenSubcommand {
+    /// Sign an input file with an ML-DSA secret key.
+    Sign {
+        /// Input file to sign.
+        #[arg(long)]
+        input: PathBuf,
+        /// Secret signing key file.
+        #[arg(long)]
+        secret_key: PathBuf,
+        /// Output detached signature file.
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Verify a detached signature with an ML-DSA public key.
+    Verify {
+        /// Signed input file.
+        #[arg(long)]
+        input: PathBuf,
+        /// Public verification key file.
+        #[arg(long)]
+        public_key: PathBuf,
+        /// Detached signature file.
+        #[arg(long)]
+        signature: PathBuf,
+    },
 }
 
 /// Arguments for `embed`.
@@ -480,6 +515,13 @@ pub enum CorpusSubcommand {
         /// Maximum results to return.
         #[arg(long, default_value = "5")]
         top: usize,
+        /// Restrict search to covers matching this AI model ID (e.g. "gemini").
+        #[arg(long)]
+        model: Option<String>,
+        /// Cover resolution to match when `--model` is set, in `WIDTHxHEIGHT`
+        /// format (e.g. "1024x1024").  Ignored if `--model` is absent.
+        #[arg(long)]
+        resolution: Option<String>,
     },
 }
 
@@ -503,6 +545,45 @@ pub struct CompletionsArgs {
     pub output: Option<PathBuf>,
 }
 
+/// Arguments for `cipher`.
+#[derive(Parser, Debug)]
+pub struct CipherArgs {
+    /// Cipher sub-operation.
+    #[command(subcommand)]
+    pub subcmd: CipherSubcommand,
+}
+
+/// Cipher sub-operations.
+#[derive(Subcommand, Debug)]
+pub enum CipherSubcommand {
+    /// Encrypt a file with AES-256-GCM. A random 12-byte nonce is generated and
+    /// prepended to the output ciphertext.
+    Encrypt {
+        /// Input plaintext file.
+        #[arg(long)]
+        input: PathBuf,
+        /// 32-byte key file.
+        #[arg(long)]
+        key: PathBuf,
+        /// Output file (nonce ‖ ciphertext).
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Decrypt a file encrypted with AES-256-GCM. The nonce is read from the
+    /// first 12 bytes of the input file.
+    Decrypt {
+        /// Input ciphertext file (12-byte nonce in first bytes).
+        #[arg(long)]
+        input: PathBuf,
+        /// 32-byte key file.
+        #[arg(long)]
+        key: PathBuf,
+        /// Output plaintext file.
+        #[arg(long)]
+        output: PathBuf,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,6 +603,38 @@ mod tests {
             "kyber1024",
             "--output",
             "/tmp/keys",
+        ]);
+        assert!(cli.is_ok());
+    }
+
+    #[test]
+    fn cli_parse_keygen_sign() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "keygen",
+            "sign",
+            "--input",
+            "payload.bin",
+            "--secret-key",
+            "secret.key",
+            "--output",
+            "payload.sig",
+        ]);
+        assert!(cli.is_ok());
+    }
+
+    #[test]
+    fn cli_parse_keygen_verify() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "keygen",
+            "verify",
+            "--input",
+            "payload.bin",
+            "--public-key",
+            "public.key",
+            "--signature",
+            "payload.sig",
         ]);
         assert!(cli.is_ok());
     }
@@ -635,5 +748,37 @@ mod tests {
     fn version_output_contains_semver() {
         let version = env!("CARGO_PKG_VERSION");
         assert!(version.contains('.'), "version should be semver");
+    }
+
+    #[test]
+    fn cli_parse_cipher_encrypt() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "cipher",
+            "encrypt",
+            "--input",
+            "payload.bin",
+            "--key",
+            "key.bin",
+            "--output",
+            "out.enc",
+        ]);
+        assert!(cli.is_ok());
+    }
+
+    #[test]
+    fn cli_parse_cipher_decrypt() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "cipher",
+            "decrypt",
+            "--input",
+            "out.enc",
+            "--key",
+            "key.bin",
+            "--output",
+            "recovered.bin",
+        ]);
+        assert!(cli.is_ok());
     }
 }
