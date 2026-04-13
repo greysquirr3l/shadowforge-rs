@@ -1,9 +1,8 @@
 //! Adapter implementing the [`Reconstructor`] port for K-of-N shard
 //! reassembly with full verification chain.
 
-use crate::domain::correction::decode_shards;
 use crate::domain::errors::ReconstructionError;
-use crate::domain::ports::{ExtractTechnique, Reconstructor};
+use crate::domain::ports::{ErrorCorrector, ExtractTechnique, Reconstructor};
 use crate::domain::reconstruction::{
     arrange_shards, count_present, deserialize_shard, validate_shard_count,
 };
@@ -86,26 +85,30 @@ impl Reconstructor for ReconstructorImpl {
         // Step 3: Validate minimum count
         validate_shard_count(present, usize::from(self.data_shards))?;
 
-        // Step 4: RS-decode
-        let recovered = decode_shards(
-            &slots,
-            self.data_shards,
-            self.parity_shards,
-            &self.hmac_key,
-            self.original_len,
-        )
-        .map_err(|source| ReconstructionError::CorrectionFailed { source })?;
+        // Step 4: RS-decode via the ErrorCorrector port.
+        let corrector = crate::adapters::correction::RsErrorCorrector::new(self.hmac_key.clone());
+        let recovered = corrector
+            .decode(&slots, self.data_shards, self.parity_shards)
+            .map_err(|source| ReconstructionError::CorrectionFailed { source })?;
 
-        Ok(Payload::from_bytes(recovered.to_vec()))
+        let payload_bytes = if self.original_len > 0 {
+            recovered
+                .get(..self.original_len)
+                .map_or_else(|| recovered.to_vec(), ToOwned::to_owned)
+        } else {
+            recovered.to_vec()
+        };
+
+        Ok(Payload::from_bytes(payload_bytes))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::correction::encode_shards;
     use crate::domain::errors::StegoError;
     use crate::domain::ports::EmbedTechnique;
+    use crate::domain::ports::ErrorCorrector;
     use crate::domain::reconstruction::serialize_shard;
     use crate::domain::types::{Capacity, CoverMedia, CoverMediaKind, StegoTechnique};
     use bytes::Bytes;
@@ -188,7 +191,8 @@ mod tests {
         hmac_key: &[u8],
         cover_size: usize,
     ) -> Result<Vec<CoverMedia>, Box<dyn std::error::Error>> {
-        let shards = encode_shards(payload, data_shards, parity_shards, hmac_key)?;
+        let corrector = crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec());
+        let shards = corrector.encode(payload, data_shards, parity_shards)?;
         let embedder = MockEmbedder;
         let covers = shards
             .iter()
