@@ -353,13 +353,23 @@ fn distribute_covers(
         args.data_shards,
         args.parity_shards,
     );
-    let stego_covers = crate::application::services::DistributeService::distribute(
-        payload,
-        covers,
-        profile,
-        &distributor,
-        embedder,
-    )?;
+    let matcher = crate::adapters::adaptive::CoverProfileMatcherImpl::with_built_in();
+    let optimiser = crate::adapters::adaptive::AdaptiveOptimiserImpl::with_built_in();
+    let compressor = crate::adapters::adaptive::CompressionSimulatorImpl;
+
+    let stego_covers =
+        crate::application::services::DistributeService::distribute_with_profile_hardening(
+            payload,
+            covers,
+            profile,
+            &distributor,
+            embedder,
+            &crate::application::services::AdaptiveProfileDeps {
+                matcher: &matcher,
+                optimiser: &optimiser,
+                compressor: &compressor,
+            },
+        )?;
     Ok((stego_covers, generated_hmac_key))
 }
 

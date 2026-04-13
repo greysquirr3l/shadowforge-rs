@@ -15,10 +15,10 @@ use crate::domain::errors::{
     ScrubberError, StegoError, TimeLockError,
 };
 use crate::domain::ports::{
-    AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort, CapacityAnalyser,
-    DeadDropEncoder, DeniableEmbedder, Distributor, EmbedTechnique, Encryptor, ExtractTechnique,
-    ForensicWatermarker, PanicWiper, Reconstructor, Signer, StyloScrubber,
-    TimeLockService as TimeLockServicePort,
+    AdaptiveOptimiser, AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort,
+    CapacityAnalyser, CompressionSimulator, CoverProfileMatcher, DeadDropEncoder, DeniableEmbedder,
+    Distributor, EmbedTechnique, Encryptor, ExtractTechnique, ForensicWatermarker, PanicWiper,
+    Reconstructor, Signer, StyloScrubber, TimeLockService as TimeLockServicePort,
 };
 use crate::domain::types::{
     AnalysisReport, ArchiveFormat, CanaryShard, CoverMedia, DeniableKeySet, DeniablePayloadPair,
@@ -165,6 +165,16 @@ impl KeyGenService {
 
 // ─── DistributeService ────────────────────────────────────────────────────────
 
+/// Dependencies for profile-specific hardening during distribution.
+pub struct AdaptiveProfileDeps<'a> {
+    /// Cover profile matcher dependency.
+    pub matcher: &'a dyn CoverProfileMatcher,
+    /// Adaptive optimiser dependency.
+    pub optimiser: &'a dyn AdaptiveOptimiser,
+    /// Compression simulator dependency.
+    pub compressor: &'a dyn CompressionSimulator,
+}
+
 /// Distribute a payload across multiple covers.
 pub struct DistributeService;
 
@@ -181,6 +191,68 @@ impl DistributeService {
         embedder: &dyn EmbedTechnique,
     ) -> Result<Vec<CoverMedia>, AppError> {
         Ok(distributor.distribute(payload, profile, covers, embedder)?)
+    }
+
+    /// Distribute and apply profile-specific adaptive hardening.
+    ///
+    /// For `Adaptive`, each output cover is optimised against its source cover.
+    /// For `CompressionSurvivable`, each output cover is passed through platform
+    /// recompression simulation.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Distribution`] for distribution failures and
+    /// [`AppError::Adaptive`] for adaptive/profile hardening failures.
+    pub fn distribute_with_profile_hardening(
+        payload: &Payload,
+        covers: Vec<CoverMedia>,
+        profile: &EmbeddingProfile,
+        distributor: &dyn Distributor,
+        embedder: &dyn EmbedTechnique,
+        deps: &AdaptiveProfileDeps<'_>,
+    ) -> Result<Vec<CoverMedia>, AppError> {
+        let prepared_covers: Vec<CoverMedia> = covers
+            .into_iter()
+            .map(|cover| {
+                if let Some(matched) = deps.matcher.profile_for(&cover) {
+                    deps.matcher.apply_profile(cover, &matched)
+                } else {
+                    Ok(cover)
+                }
+            })
+            .collect::<Result<_, _>>()?;
+
+        let original_covers = prepared_covers.clone();
+        let distributed = distributor.distribute(payload, profile, prepared_covers, embedder)?;
+
+        if distributed.len() != original_covers.len() {
+            return Err(AppError::Adaptive(AdaptiveError::ProfileMatchFailed {
+                reason: format!(
+                    "distributed cover count mismatch: got {}, expected {}",
+                    distributed.len(),
+                    original_covers.len()
+                ),
+            }));
+        }
+
+        match profile {
+            EmbeddingProfile::Standard | EmbeddingProfile::CorpusBased => Ok(distributed),
+            EmbeddingProfile::Adaptive {
+                max_detectability_db,
+            } => distributed
+                .into_iter()
+                .zip(original_covers.iter())
+                .map(|(stego, original)| {
+                    deps.optimiser
+                        .optimise(stego, original, *max_detectability_db)
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(AppError::from),
+            EmbeddingProfile::CompressionSurvivable { platform } => distributed
+                .into_iter()
+                .map(|stego| deps.compressor.simulate(stego, platform))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(AppError::from),
+        }
     }
 }
 
@@ -467,6 +539,8 @@ mod tests {
     use super::*;
     use crate::domain::types::{Capacity, CoverMediaKind, Shard};
     use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use uuid::Uuid;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -756,6 +830,151 @@ mod tests {
         let result =
             DistributeService::distribute(&payload, covers, &profile, &distributor, &embedder)?;
         assert_eq!(result.len(), 2);
+        Ok(())
+    }
+
+    struct MockCoverProfileMatcher {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl CoverProfileMatcher for MockCoverProfileMatcher {
+        fn profile_for(&self, _cover: &CoverMedia) -> Option<crate::domain::ports::CoverProfile> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+
+        fn apply_profile(
+            &self,
+            cover: CoverMedia,
+            _profile: &crate::domain::ports::CoverProfile,
+        ) -> Result<CoverMedia, AdaptiveError> {
+            Ok(cover)
+        }
+    }
+
+    struct MockAdaptiveOptimiser {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl AdaptiveOptimiser for MockAdaptiveOptimiser {
+        fn optimise(
+            &self,
+            stego: CoverMedia,
+            _original: &CoverMedia,
+            _target_db: f64,
+        ) -> Result<CoverMedia, AdaptiveError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Ok(stego)
+        }
+    }
+
+    struct MockCompressionSimulator {
+        simulate_calls: Arc<AtomicUsize>,
+    }
+
+    impl CompressionSimulator for MockCompressionSimulator {
+        fn simulate(
+            &self,
+            cover: CoverMedia,
+            _platform: &PlatformProfile,
+        ) -> Result<CoverMedia, AdaptiveError> {
+            self.simulate_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(cover)
+        }
+
+        fn survivable_capacity(
+            &self,
+            cover: &CoverMedia,
+            _platform: &PlatformProfile,
+        ) -> Result<Capacity, AdaptiveError> {
+            Ok(Capacity {
+                bytes: cover.data.len() as u64,
+                technique: StegoTechnique::LsbImage,
+            })
+        }
+    }
+
+    #[test]
+    fn distribute_with_profile_hardening_uses_optimiser_for_adaptive() -> TestResult {
+        let payload = Payload::from_bytes(b"payload".to_vec());
+        let covers = vec![make_cover(64), make_cover(64)];
+        let profile = EmbeddingProfile::Adaptive {
+            max_detectability_db: -12.0,
+        };
+        let distributor = MockDistributor;
+        let embedder = MockEmbedder;
+        let matcher_calls = Arc::new(AtomicUsize::new(0));
+        let optimiser_calls = Arc::new(AtomicUsize::new(0));
+        let simulator_calls = Arc::new(AtomicUsize::new(0));
+        let matcher = MockCoverProfileMatcher {
+            calls: Arc::clone(&matcher_calls),
+        };
+        let optimiser = MockAdaptiveOptimiser {
+            calls: Arc::clone(&optimiser_calls),
+        };
+        let compressor = MockCompressionSimulator {
+            simulate_calls: Arc::clone(&simulator_calls),
+        };
+
+        let result = DistributeService::distribute_with_profile_hardening(
+            &payload,
+            covers,
+            &profile,
+            &distributor,
+            &embedder,
+            &AdaptiveProfileDeps {
+                matcher: &matcher,
+                optimiser: &optimiser,
+                compressor: &compressor,
+            },
+        )?;
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(matcher_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(optimiser_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(simulator_calls.load(Ordering::Relaxed), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn distribute_with_profile_hardening_uses_simulator_for_survivable() -> TestResult {
+        let payload = Payload::from_bytes(b"payload".to_vec());
+        let covers = vec![make_cover(64), make_cover(64), make_cover(64)];
+        let profile = EmbeddingProfile::CompressionSurvivable {
+            platform: PlatformProfile::Instagram,
+        };
+        let distributor = MockDistributor;
+        let embedder = MockEmbedder;
+        let matcher_calls = Arc::new(AtomicUsize::new(0));
+        let optimiser_calls = Arc::new(AtomicUsize::new(0));
+        let simulator_calls = Arc::new(AtomicUsize::new(0));
+        let matcher = MockCoverProfileMatcher {
+            calls: Arc::clone(&matcher_calls),
+        };
+        let optimiser = MockAdaptiveOptimiser {
+            calls: Arc::clone(&optimiser_calls),
+        };
+        let compressor = MockCompressionSimulator {
+            simulate_calls: Arc::clone(&simulator_calls),
+        };
+
+        let result = DistributeService::distribute_with_profile_hardening(
+            &payload,
+            covers,
+            &profile,
+            &distributor,
+            &embedder,
+            &AdaptiveProfileDeps {
+                matcher: &matcher,
+                optimiser: &optimiser,
+                compressor: &compressor,
+            },
+        )?;
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(matcher_calls.load(Ordering::Relaxed), 3);
+        assert_eq!(optimiser_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(simulator_calls.load(Ordering::Relaxed), 3);
         Ok(())
     }
 
