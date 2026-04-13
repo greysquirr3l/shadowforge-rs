@@ -16,14 +16,16 @@ use crate::domain::errors::{
 };
 use crate::domain::ports::{
     AdaptiveOptimiser, AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort,
-    CapacityAnalyser, CompressionSimulator, CoverProfileMatcher, DeadDropEncoder, DeniableEmbedder,
-    Distributor, EmbedTechnique, Encryptor, ExtractTechnique, ForensicWatermarker, PanicWiper,
-    Reconstructor, Signer, StyloScrubber, SymmetricCipher, TimeLockService as TimeLockServicePort,
+    CapacityAnalyser, CompressionSimulator, CorpusIndex, CoverProfileMatcher, DeadDropEncoder,
+    DeniableEmbedder, Distributor, EmbedTechnique, Encryptor, ExtractTechnique,
+    ForensicWatermarker, PanicWiper, Reconstructor, Signer, StyloScrubber, SymmetricCipher,
+    TimeLockService as TimeLockServicePort,
 };
 use crate::domain::types::{
-    AnalysisReport, ArchiveFormat, CanaryShard, CoverMedia, DeniableKeySet, DeniablePayloadPair,
-    EmbeddingProfile, KeyPair, PanicWipeConfig, Payload, PlatformProfile, Signature,
-    StegoTechnique, StyloProfile, TimeLockPuzzle, WatermarkReceipt, WatermarkTripwireTag,
+    AnalysisReport, ArchiveFormat, CanaryShard, CorpusEntry, CoverMedia, DeniableKeySet,
+    DeniablePayloadPair, EmbeddingProfile, KeyPair, PanicWipeConfig, Payload, PlatformProfile,
+    Signature, SpectralKey, StegoTechnique, StyloProfile, TimeLockPuzzle, WatermarkReceipt,
+    WatermarkTripwireTag,
 };
 
 // ─── AppError ─────────────────────────────────────────────────────────────────
@@ -562,6 +564,56 @@ impl PanicWipeService {
     /// Returns [`AppError::Opsec`] on failure.
     pub fn wipe(config: &PanicWipeConfig, wiper: &dyn PanicWiper) -> Result<(), AppError> {
         Ok(wiper.wipe(config)?)
+    }
+}
+
+// ─── CorpusService ───────────────────────────────────────────────────────────
+
+/// Corpus index and cover-selection orchestrator.
+pub struct CorpusService;
+
+impl CorpusService {
+    /// Build the corpus index from a directory tree.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Corpus`] on failure.
+    pub fn build_index(
+        index: &dyn CorpusIndex,
+        corpus_dir: &std::path::Path,
+    ) -> Result<usize, AppError> {
+        Ok(index.build_index(corpus_dir)?)
+    }
+
+    /// Search the index for covers that best encode `payload` using `technique`.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Corpus`] on failure.
+    pub fn search(
+        index: &dyn CorpusIndex,
+        payload: &Payload,
+        technique: StegoTechnique,
+        max_results: usize,
+    ) -> Result<Vec<CorpusEntry>, AppError> {
+        Ok(index.search(payload, technique, max_results)?)
+    }
+
+    /// Search the index restricted to a specific camera model and resolution.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Corpus`] on failure.
+    pub fn search_for_model(
+        index: &dyn CorpusIndex,
+        payload: &Payload,
+        model_id: &str,
+        resolution: (u32, u32),
+        max_results: usize,
+    ) -> Result<Vec<CorpusEntry>, AppError> {
+        Ok(index.search_for_model(payload, model_id, resolution, max_results)?)
+    }
+
+    /// Return per-model/resolution entry counts from the index.
+    pub fn model_stats(index: &dyn CorpusIndex) -> Vec<(SpectralKey, usize)> {
+        index.model_stats()
     }
 }
 
@@ -1427,6 +1479,118 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("crypto"));
         assert!(msg.contains("oops"));
+    }
+
+    // ─── CorpusService ────────────────────────────────────────────────────
+
+    struct MockCorpusIndex {
+        build_count: usize,
+        search_entries: Vec<CorpusEntry>,
+    }
+
+    impl MockCorpusIndex {
+        fn new(build_count: usize, search_entries: Vec<CorpusEntry>) -> Self {
+            Self {
+                build_count,
+                search_entries,
+            }
+        }
+    }
+
+    impl crate::domain::ports::CorpusIndex for MockCorpusIndex {
+        fn build_index(
+            &self,
+            _dir: &std::path::Path,
+        ) -> Result<usize, crate::domain::errors::CorpusError> {
+            Ok(self.build_count)
+        }
+        fn add_to_index(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<CorpusEntry, crate::domain::errors::CorpusError> {
+            Ok(CorpusEntry {
+                file_hash: [0u8; 32],
+                path: path.to_string_lossy().into_owned(),
+                cover_kind: CoverMediaKind::PngImage,
+                precomputed_bit_pattern: bytes::Bytes::new(),
+                spectral_key: None,
+            })
+        }
+        fn search(
+            &self,
+            _payload: &Payload,
+            _technique: StegoTechnique,
+            _max: usize,
+        ) -> Result<Vec<CorpusEntry>, crate::domain::errors::CorpusError> {
+            Ok(self.search_entries.clone())
+        }
+        fn search_for_model(
+            &self,
+            _payload: &Payload,
+            _model_id: &str,
+            _res: (u32, u32),
+            _max: usize,
+        ) -> Result<Vec<CorpusEntry>, crate::domain::errors::CorpusError> {
+            Ok(self.search_entries.clone())
+        }
+        fn model_stats(&self) -> Vec<(SpectralKey, usize)> {
+            vec![(
+                SpectralKey {
+                    model_id: "test-model".into(),
+                    resolution: (1920, 1080),
+                },
+                self.build_count,
+            )]
+        }
+    }
+
+    fn make_corpus_entry(path: &str) -> CorpusEntry {
+        CorpusEntry {
+            file_hash: [0u8; 32],
+            path: path.to_owned(),
+            cover_kind: CoverMediaKind::PngImage,
+            precomputed_bit_pattern: bytes::Bytes::new(),
+            spectral_key: None,
+        }
+    }
+
+    #[test]
+    fn corpus_service_build_index() -> TestResult {
+        let idx = MockCorpusIndex::new(42, vec![]);
+        let count = CorpusService::build_index(&idx, std::path::Path::new("/some/dir"))?;
+        assert_eq!(count, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_service_search() -> TestResult {
+        let entry = make_corpus_entry("covers/img001.png");
+        let idx = MockCorpusIndex::new(1, vec![entry.clone()]);
+        let payload = Payload::from_bytes(bytes::Bytes::from_static(b"hello"));
+        let results = CorpusService::search(&idx, &payload, StegoTechnique::LsbImage, 5)?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, entry.path);
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_service_search_for_model() -> TestResult {
+        let entry = make_corpus_entry("covers/gemini001.png");
+        let idx = MockCorpusIndex::new(1, vec![entry.clone()]);
+        let payload = Payload::from_bytes(bytes::Bytes::from_static(b"hello"));
+        let results = CorpusService::search_for_model(&idx, &payload, "gemini", (1920, 1080), 3)?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, entry.path);
+        Ok(())
+    }
+
+    #[test]
+    fn corpus_service_model_stats() {
+        let idx = MockCorpusIndex::new(7, vec![]);
+        let stats = CorpusService::model_stats(&idx);
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].0.model_id, "test-model");
+        assert_eq!(stats[0].1, 7);
     }
 
     // ─── CipherService ────────────────────────────────────────────────────

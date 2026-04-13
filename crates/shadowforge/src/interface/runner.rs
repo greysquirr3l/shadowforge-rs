@@ -9,8 +9,8 @@ const MAX_STDIN_PAYLOAD: u64 = 256 * 1024 * 1024;
 use clap::Parser;
 
 use crate::application::services::{
-    AnalyseService, AppError, ArchiveService, CipherService, EmbedService, ExtractService,
-    KeyGenService, ScrubService,
+    AnalyseService, AppError, ArchiveService, CipherService, CorpusService, EmbedService,
+    ExtractService, KeyGenService, ScrubService,
 };
 use crate::domain::errors::{CanaryError, OpsecError, StegoError};
 use crate::domain::ports::{EmbedTechnique, ExtractTechnique, GeographicDistributor, MediaLoader};
@@ -675,12 +675,10 @@ fn cmd_watermark(args: &cli::WatermarkArgs) -> Result<(), AppError> {
 // ─── Corpus ───────────────────────────────────────────────────────────────────
 
 fn cmd_corpus(args: &cli::CorpusArgs) -> Result<(), AppError> {
-    use crate::domain::ports::CorpusIndex;
-
     let index = crate::adapters::corpus::CorpusIndexImpl::new();
     match &args.subcmd {
         cli::CorpusSubcommand::Build { dir } => {
-            let count = index.build_index(dir)?;
+            let count = CorpusService::build_index(&index, dir)?;
             eprintln!("Indexed {count} images from {}", dir.display());
         }
         cli::CorpusSubcommand::Search {
@@ -705,9 +703,9 @@ fn cmd_corpus(args: &cli::CorpusArgs) -> Result<(), AppError> {
                         Some((w, h))
                     })
                     .unwrap_or((0, 0));
-                index.search_for_model(&payload, model_id, res, *top)?
+                CorpusService::search_for_model(&index, &payload, model_id, res, *top)?
             } else {
-                index.search(&payload, tech, *top)?
+                CorpusService::search(&index, &payload, tech, *top)?
             };
 
             for entry in &results {
