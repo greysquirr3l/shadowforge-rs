@@ -73,6 +73,9 @@ pub enum Commands {
 
     /// Generate shell completions.
     Completions(CompletionsArgs),
+
+    /// Symmetric cipher operations (AES-256-GCM).
+    Cipher(CipherArgs),
 }
 
 // ─── Value enums ──────────────────────────────────────────────────────────────
@@ -510,6 +513,45 @@ pub struct CompletionsArgs {
     pub output: Option<PathBuf>,
 }
 
+/// Arguments for `cipher`.
+#[derive(Parser, Debug)]
+pub struct CipherArgs {
+    /// Cipher sub-operation.
+    #[command(subcommand)]
+    pub subcmd: CipherSubcommand,
+}
+
+/// Cipher sub-operations.
+#[derive(Subcommand, Debug)]
+pub enum CipherSubcommand {
+    /// Encrypt a file with AES-256-GCM. A random 12-byte nonce is generated and
+    /// prepended to the output ciphertext.
+    Encrypt {
+        /// Input plaintext file.
+        #[arg(long)]
+        input: PathBuf,
+        /// 32-byte key file.
+        #[arg(long)]
+        key: PathBuf,
+        /// Output file (nonce ‖ ciphertext).
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Decrypt a file encrypted with AES-256-GCM. The nonce is read from the
+    /// first 12 bytes of the input file.
+    Decrypt {
+        /// Input ciphertext file (12-byte nonce in first bytes).
+        #[arg(long)]
+        input: PathBuf,
+        /// 32-byte key file.
+        #[arg(long)]
+        key: PathBuf,
+        /// Output plaintext file.
+        #[arg(long)]
+        output: PathBuf,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -642,5 +684,37 @@ mod tests {
     fn version_output_contains_semver() {
         let version = env!("CARGO_PKG_VERSION");
         assert!(version.contains('.'), "version should be semver");
+    }
+
+    #[test]
+    fn cli_parse_cipher_encrypt() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "cipher",
+            "encrypt",
+            "--input",
+            "payload.bin",
+            "--key",
+            "key.bin",
+            "--output",
+            "out.enc",
+        ]);
+        assert!(cli.is_ok());
+    }
+
+    #[test]
+    fn cli_parse_cipher_decrypt() {
+        let cli = Cli::try_parse_from([
+            "shadowforge",
+            "cipher",
+            "decrypt",
+            "--input",
+            "out.enc",
+            "--key",
+            "key.bin",
+            "--output",
+            "recovered.bin",
+        ]);
+        assert!(cli.is_ok());
     }
 }
