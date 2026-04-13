@@ -279,11 +279,8 @@ impl DistributeService {
         let original_cover_count = prepared_covers.len();
         // Clone originals only for the Adaptive branch, which needs to pair each
         // output cover against its source for detectability scoring.
-        let original_covers_opt: Option<Vec<CoverMedia>> = matches!(
-            profile,
-            EmbeddingProfile::Adaptive { .. }
-        )
-        .then(|| prepared_covers.clone());
+        let original_covers_opt: Option<Vec<CoverMedia>> =
+            matches!(profile, EmbeddingProfile::Adaptive { .. }).then(|| prepared_covers.clone());
         let distributed = distributor.distribute(payload, profile, prepared_covers, embedder)?;
 
         if distributed.len() != original_cover_count {
