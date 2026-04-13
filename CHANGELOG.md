@@ -13,19 +13,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **ML-DSA sign/verify CLI workflows** — `keygen sign` and `keygen verify`
   subcommands exposed, enabling signing arbitrary payloads and verifying
   detached ML-DSA-87 signatures directly from the CLI
-
-### Refactored
-
-- **Geographic distribution boundary hardened** — `DistributeService` now
-  exposes `distribute_with_geographic_manifest`, routing geo-threshold
-  distribution through the application service layer rather than calling the
-  adapter port directly from the runner; eliminates an interface→adapter
-  boundary violation
-
----
-
-### Added
-
 - **Spectral adaptive embedding primitives** — introduced AI-generator-aware
   profile vocabulary (`AiGenProfile`, `CarrierBin`, `CoverProfile`,
   `SpectralKey`) to model known FFT carrier regions and resolution-specific
@@ -49,6 +36,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **Corpus entry enrichment** — corpus indexing now records
   `CorpusEntry::spectral_key` when generator profile matching succeeds,
   enabling resolution-matched model bucketing
+
+### Refactored
+
+- **Geographic distribution boundary hardened** — `DistributeService` now
+  exposes `distribute_with_geographic_manifest`, routing geo-threshold
+  distribution through the application service layer rather than calling the
+  adapter port directly from the runner; eliminates an interface→adapter
+  boundary violation
 
 ### Testing
 
