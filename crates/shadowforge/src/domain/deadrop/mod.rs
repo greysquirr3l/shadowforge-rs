@@ -10,6 +10,7 @@ use crate::domain::types::{PlatformProfile, RetrievalManifest, StegoTechnique};
 /// Build a [`RetrievalManifest`] for a dead-drop cover.
 ///
 /// The `stego_bytes` are hashed to produce the integrity digest.
+#[must_use]
 pub fn build_retrieval_manifest(
     platform: &PlatformProfile,
     retrieval_url: String,
