@@ -3,7 +3,7 @@
 
 use crate::domain::distribution::{assign_many_to_many, assign_one_to_many, validate_cover_count};
 use crate::domain::errors::DistributionError;
-use crate::domain::ports::{Distributor, EmbedTechnique};
+use crate::domain::ports::{Distributor, EmbedTechnique, ErrorCorrector};
 use crate::domain::types::{CoverMedia, DistributionPattern, EmbeddingProfile, Payload};
 
 /// Concrete [`Distributor`] implementation.
@@ -171,9 +171,9 @@ fn distribute_one_to_many(
     parity_shards: u8,
     hmac_key: &[u8],
 ) -> Result<Vec<CoverMedia>, DistributionError> {
-    use crate::domain::correction::encode_shards;
-
-    let shards = encode_shards(payload.as_bytes(), data_shards, parity_shards, hmac_key)
+    let corrector = crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec());
+    let shards = corrector
+        .encode(payload.as_bytes(), data_shards, parity_shards)
         .map_err(|source| DistributionError::CorrectionFailed { source })?;
 
     let assignments = assign_one_to_many(shards.len(), covers.len());

@@ -9,12 +9,12 @@ const MAX_STDIN_PAYLOAD: u64 = 256 * 1024 * 1024;
 use clap::Parser;
 
 use crate::application::services::{
-    AnalyseService, AppError, ArchiveService, EmbedService, ExtractService, KeyGenService,
-    ScrubService,
+    AnalyseService, AppError, ArchiveService, CipherService, CorpusService, EmbedService,
+    ExtractService, KeyGenService, ScrubService,
 };
 use crate::domain::errors::{CanaryError, OpsecError, StegoError};
-use crate::domain::ports::{EmbedTechnique, ExtractTechnique, GeographicDistributor, MediaLoader};
-use crate::domain::types::{CoverMedia, CoverMediaKind, Payload, StegoTechnique};
+use crate::domain::ports::{EmbedTechnique, ExtractTechnique, MediaLoader};
+use crate::domain::types::{CoverMedia, CoverMediaKind, Payload, Signature, StegoTechnique};
 
 use super::cli::{self, Cli, Commands};
 
@@ -51,6 +51,7 @@ pub fn dispatch(cli: Cli) -> Result<(), AppError> {
         Commands::Corpus(args) => cmd_corpus(&args),
         Commands::Panic(args) => cmd_panic(&args),
         Commands::Completions(args) => cmd_completions(&args),
+        Commands::Cipher(args) => cmd_cipher(&args),
     }
 }
 
@@ -63,10 +64,36 @@ fn print_version() {
 // ─── Keygen ───────────────────────────────────────────────────────────────────
 
 fn cmd_keygen(args: &cli::KeygenArgs) -> Result<(), AppError> {
-    let dir = &args.output;
+    match &args.subcmd {
+        Some(cli::KeygenSubcommand::Sign {
+            input,
+            secret_key,
+            output,
+        }) => cmd_keygen_sign(input, secret_key, output),
+        Some(cli::KeygenSubcommand::Verify {
+            input,
+            public_key,
+            signature,
+        }) => cmd_keygen_verify(input, public_key, signature),
+        None => cmd_keygen_generate(args),
+    }
+}
+
+fn cmd_keygen_generate(args: &cli::KeygenArgs) -> Result<(), AppError> {
+    let Some(dir) = args.output.as_ref() else {
+        return Err(AppError::Stego(StegoError::MalformedCoverData {
+            reason: "--output is required when no keygen subcommand is used".to_string(),
+        }));
+    };
+    let Some(algorithm) = args.algorithm else {
+        return Err(AppError::Stego(StegoError::MalformedCoverData {
+            reason: "--algorithm is required when no keygen subcommand is used".to_string(),
+        }));
+    };
+
     fs_create_dir_all(dir)?;
 
-    match args.algorithm {
+    match algorithm {
         cli::Algorithm::Kyber1024 => {
             let enc = crate::adapters::crypto::MlKemEncryptor;
             let kp = KeyGenService::generate_keypair(&enc)?;
@@ -82,6 +109,34 @@ fn cmd_keygen(args: &cli::KeygenArgs) -> Result<(), AppError> {
     }
     eprintln!("Keys written to {}", dir.display());
     Ok(())
+}
+
+fn cmd_keygen_sign(input: &Path, secret_key: &Path, output: &Path) -> Result<(), AppError> {
+    let signer = crate::adapters::crypto::MlDsaSigner;
+    let message = fs_read(input)?;
+    let sk = fs_read(secret_key)?;
+    let signature = KeyGenService::sign(&signer, &sk, &message)?;
+    fs_write(output, signature.0.as_ref())?;
+    eprintln!("Signature written to {}", output.display());
+    Ok(())
+}
+
+fn cmd_keygen_verify(input: &Path, public_key: &Path, signature: &Path) -> Result<(), AppError> {
+    let signer = crate::adapters::crypto::MlDsaSigner;
+    let message = fs_read(input)?;
+    let pk = fs_read(public_key)?;
+    let sig = Signature(bytes::Bytes::from(fs_read(signature)?));
+    let valid = KeyGenService::verify(&signer, &pk, &message, &sig)?;
+    if valid {
+        eprintln!("Signature verification: ok");
+        Ok(())
+    } else {
+        Err(AppError::Crypto(
+            crate::domain::errors::CryptoError::VerificationFailed {
+                reason: "invalid signature".to_string(),
+            },
+        ))
+    }
 }
 
 // ─── Embed ────────────────────────────────────────────────────────────────────
@@ -334,7 +389,13 @@ fn distribute_covers(
         let manifest = load_geographic_manifest(manifest_path)?;
         let geo_distributor = crate::adapters::opsec::GeographicDistributorImpl::new();
         let stego_covers =
-            geo_distributor.distribute_with_manifest(payload, covers, &manifest, embedder)?;
+            crate::application::services::DistributeService::distribute_with_geographic_manifest(
+                payload,
+                covers,
+                &manifest,
+                embedder,
+                &geo_distributor,
+            )?;
         return Ok((stego_covers, None));
     }
 
@@ -353,13 +414,21 @@ fn distribute_covers(
         args.data_shards,
         args.parity_shards,
     );
-    let stego_covers = crate::application::services::DistributeService::distribute(
-        payload,
-        covers,
-        profile,
-        &distributor,
-        embedder,
-    )?;
+    let (matcher, optimiser, compressor) = crate::adapters::adaptive::build_adaptive_profile_deps();
+
+    let stego_covers =
+        crate::application::services::DistributeService::distribute_with_profile_hardening(
+            payload,
+            covers,
+            profile,
+            &distributor,
+            embedder,
+            &crate::application::services::AdaptiveProfileDeps {
+                matcher: &matcher,
+                optimiser: &optimiser,
+                compressor: &compressor,
+            },
+        )?;
     Ok((stego_covers, generated_hmac_key))
 }
 
@@ -423,6 +492,38 @@ fn cmd_extract_distributed(args: &cli::ExtractDistributedArgs) -> Result<(), App
 
 // ─── Analyse ──────────────────────────────────────────────────────────────────
 
+/// Format an `AnalysisReport` as a human-readable string.
+/// Exposed for unit testing.
+pub(crate) fn format_analysis_report(report: &crate::domain::types::AnalysisReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Technique:     {:?}", report.technique);
+    let _ = writeln!(out, "Capacity:      {} bytes", report.cover_capacity.bytes);
+    let _ = writeln!(out, "Chi-square:    {:.2} dB", report.chi_square_score);
+    let _ = writeln!(out, "Risk:          {:?}", report.detectability_risk);
+    let _ = writeln!(
+        out,
+        "Recommended:   {} bytes",
+        report.recommended_max_payload_bytes
+    );
+    if let Some(s) = &report.spectral_score {
+        let _ = writeln!(out, "--- Spectral Detectability ---");
+        let _ = writeln!(out, "  Phase coherence drop: {:.4}", s.phase_coherence_drop);
+        let _ = writeln!(
+            out,
+            "  Carrier SNR drop:     {:.2} dB",
+            s.carrier_snr_drop_db
+        );
+        let _ = writeln!(
+            out,
+            "  Sample-pair asymmetry:{:.4}",
+            s.sample_pair_asymmetry
+        );
+        let _ = writeln!(out, "  Spectral risk:        {:?}", s.combined_risk);
+    }
+    out
+}
+
 fn cmd_analyse(args: &cli::AnalyseArgs) -> Result<(), AppError> {
     let technique = resolve_technique(args.technique);
     let cover = load_cover_from_path(&args.cover, technique)?;
@@ -437,14 +538,7 @@ fn cmd_analyse(args: &cli::AnalyseArgs) -> Result<(), AppError> {
         })?;
         println!("{json}");
     } else {
-        println!("Technique:     {:?}", report.technique);
-        println!("Capacity:      {} bytes", report.cover_capacity.bytes);
-        println!("Chi-square:    {:.2} dB", report.chi_square_score);
-        println!("Risk:          {:?}", report.detectability_risk);
-        println!(
-            "Recommended:   {} bytes",
-            report.recommended_max_payload_bytes
-        );
+        print!("{}", format_analysis_report(&report));
     }
     Ok(())
 }
@@ -664,23 +758,47 @@ fn cmd_watermark(args: &cli::WatermarkArgs) -> Result<(), AppError> {
 // ─── Corpus ───────────────────────────────────────────────────────────────────
 
 fn cmd_corpus(args: &cli::CorpusArgs) -> Result<(), AppError> {
-    use crate::domain::ports::CorpusIndex;
-
     let index = crate::adapters::corpus::CorpusIndexImpl::new();
     match &args.subcmd {
         cli::CorpusSubcommand::Build { dir } => {
-            let count = index.build_index(dir)?;
+            let count = CorpusService::build_index(&index, dir)?;
             eprintln!("Indexed {count} images from {}", dir.display());
         }
         cli::CorpusSubcommand::Search {
             input,
             technique,
             top,
+            model,
+            resolution,
         } => {
             let data = fs_read(input)?;
             let payload = Payload::from_bytes(data);
             let tech = resolve_technique(*technique);
-            let results = index.search(&payload, tech, *top)?;
+
+            // If --model is provided, use model-aware search.  --resolution
+            // is required in that case; an absent or unparseable value returns
+            // a clear error rather than silently falling back to (0, 0).
+            let results = if let Some(model_id) = model {
+                let res = resolution
+                    .as_deref()
+                    .and_then(|s| {
+                        let mut parts = s.splitn(2, 'x');
+                        let w = parts.next()?.parse::<u32>().ok()?;
+                        let h = parts.next()?.parse::<u32>().ok()?;
+                        Some((w, h))
+                    })
+                    .ok_or_else(|| {
+                        AppError::Stego(StegoError::MalformedCoverData {
+                            reason: "--model requires --resolution in WIDTHxHEIGHT format \
+                                     (e.g. --resolution 1024x1024)"
+                                .to_string(),
+                        })
+                    })?;
+                CorpusService::search_for_model(&index, &payload, model_id, res, *top)?
+            } else {
+                CorpusService::search(&index, &payload, tech, *top)?
+            };
+
             for entry in &results {
                 println!("{}", entry.path);
             }
@@ -720,6 +838,56 @@ fn cmd_completions(args: &cli::CompletionsArgs) -> Result<(), AppError> {
         }
         None => {
             generate(args.shell, &mut cmd, "shadowforge", &mut io::stdout());
+        }
+    }
+    Ok(())
+}
+
+// ─── Cipher ───────────────────────────────────────────────────────────────────
+
+/// AES-256-GCM nonce length in bytes.
+const AES_GCM_NONCE_LEN: usize = 12;
+
+fn cmd_cipher(args: &cli::CipherArgs) -> Result<(), AppError> {
+    use rand_core::Rng as _;
+
+    let cipher = crate::adapters::crypto::Aes256GcmCipher;
+    match &args.subcmd {
+        cli::CipherSubcommand::Encrypt { input, key, output } => {
+            let plaintext = fs_read(input)?;
+            let key_bytes = fs_read(key)?;
+            let mut nonce = [0u8; AES_GCM_NONCE_LEN];
+            rand::rng().fill_bytes(&mut nonce);
+            let ciphertext = CipherService::encrypt(&cipher, &key_bytes, &nonce, &plaintext)?;
+            let mut out = Vec::with_capacity(AES_GCM_NONCE_LEN.strict_add(ciphertext.len()));
+            out.extend_from_slice(&nonce);
+            out.extend_from_slice(&ciphertext);
+            fs_write(output, &out)?;
+            eprintln!(
+                "Encrypted {} bytes -> {}",
+                plaintext.len(),
+                output.display()
+            );
+        }
+        cli::CipherSubcommand::Decrypt { input, key, output } => {
+            let data = fs_read(input)?;
+            let key_bytes = fs_read(key)?;
+            if data.len() < AES_GCM_NONCE_LEN {
+                return Err(AppError::Crypto(
+                    crate::domain::errors::CryptoError::InvalidNonceLength {
+                        expected: AES_GCM_NONCE_LEN,
+                        got: data.len(),
+                    },
+                ));
+            }
+            let (nonce, ciphertext) = data.split_at(AES_GCM_NONCE_LEN);
+            let plaintext = CipherService::decrypt(&cipher, &key_bytes, nonce, ciphertext)?;
+            fs_write(output, &plaintext)?;
+            eprintln!(
+                "Decrypted {} bytes -> {}",
+                plaintext.len(),
+                output.display()
+            );
         }
     }
     Ok(())
@@ -1126,9 +1294,7 @@ fn resolve_profile(
 ) -> crate::domain::types::EmbeddingProfile {
     match profile {
         cli::Profile::Standard => crate::domain::types::EmbeddingProfile::Standard,
-        cli::Profile::Adaptive => crate::domain::types::EmbeddingProfile::Adaptive {
-            max_detectability_db: -12.0,
-        },
+        cli::Profile::Adaptive => crate::domain::types::EmbeddingProfile::default_adaptive(),
         cli::Profile::Survivable => {
             let p = platform.map_or(crate::domain::types::PlatformProfile::Instagram, |pl| {
                 resolve_platform(pl)
@@ -1237,10 +1403,11 @@ fn load_watermark_tags(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_embedder, build_extractor, cmd_extract, load_cover, load_cover_from_path,
+        build_embedder, build_extractor, cmd_extract, cmd_keygen, load_cover, load_cover_from_path,
         save_cover_to_path,
     };
-    use crate::application::services::DeniableEmbedService;
+    use crate::application::services::{AppError, DeniableEmbedService};
+    use crate::domain::errors::CryptoError;
     use crate::domain::types::{CoverMediaKind, StegoTechnique};
     use crate::interface::cli;
     use image::{DynamicImage, Rgba, RgbaImage};
@@ -1342,5 +1509,168 @@ mod tests {
         let extracted = fs::read(output_path)?;
         assert_eq!(extracted, b"real secret");
         Ok(())
+    }
+
+    #[test]
+    fn keygen_sign_produces_signature_artifact() -> TestResult {
+        let dir = tempdir()?;
+        let keys_dir = dir.path().join("keys");
+        let msg_path = dir.path().join("message.bin");
+        let sig_path = dir.path().join("message.sig");
+
+        let generate = cli::KeygenArgs {
+            subcmd: None,
+            algorithm: Some(cli::Algorithm::Dilithium3),
+            output: Some(keys_dir.clone()),
+        };
+        cmd_keygen(&generate)?;
+
+        fs::write(&msg_path, b"hello signer")?;
+        let sign = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Sign {
+                input: msg_path,
+                secret_key: keys_dir.join("secret.key"),
+                output: sig_path.clone(),
+            }),
+            algorithm: None,
+            output: None,
+        };
+        cmd_keygen(&sign)?;
+
+        let sig = fs::read(sig_path)?;
+        assert!(!sig.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn keygen_verify_reports_success_and_failure_status() -> TestResult {
+        let dir = tempdir()?;
+        let keys_dir = dir.path().join("keys");
+        let msg_path = dir.path().join("message.bin");
+        let tampered_path = dir.path().join("message_tampered.bin");
+        let sig_path = dir.path().join("message.sig");
+
+        let generate = cli::KeygenArgs {
+            subcmd: None,
+            algorithm: Some(cli::Algorithm::Dilithium3),
+            output: Some(keys_dir.clone()),
+        };
+        cmd_keygen(&generate)?;
+
+        fs::write(&msg_path, b"signed message")?;
+        fs::write(&tampered_path, b"signed message with tamper")?;
+
+        let sign = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Sign {
+                input: msg_path.clone(),
+                secret_key: keys_dir.join("secret.key"),
+                output: sig_path.clone(),
+            }),
+            algorithm: None,
+            output: None,
+        };
+        cmd_keygen(&sign)?;
+
+        let verify_ok = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Verify {
+                input: msg_path,
+                public_key: keys_dir.join("public.key"),
+                signature: sig_path.clone(),
+            }),
+            algorithm: None,
+            output: None,
+        };
+        assert!(cmd_keygen(&verify_ok).is_ok());
+
+        let verify_fail = cli::KeygenArgs {
+            subcmd: Some(cli::KeygenSubcommand::Verify {
+                input: tampered_path,
+                public_key: keys_dir.join("public.key"),
+                signature: sig_path,
+            }),
+            algorithm: None,
+            output: None,
+        };
+        let err = cmd_keygen(&verify_fail).err();
+        assert!(matches!(
+            err,
+            Some(AppError::Crypto(CryptoError::VerificationFailed { .. }))
+        ));
+        Ok(())
+    }
+
+    // ─── format_analysis_report ───────────────────────────────────────────
+
+    use super::format_analysis_report;
+    use crate::domain::types::{
+        AnalysisReport, Capacity, DetectabilityRisk, SpectralScore, StegoTechnique as ST,
+    };
+
+    fn base_report() -> AnalysisReport {
+        AnalysisReport {
+            technique: ST::LsbImage,
+            cover_capacity: Capacity {
+                bytes: 1024,
+                technique: ST::LsbImage,
+            },
+            chi_square_score: std::f64::consts::PI,
+            detectability_risk: DetectabilityRisk::Low,
+            recommended_max_payload_bytes: 512,
+            spectral_score: None,
+        }
+    }
+
+    #[test]
+    fn format_report_contains_core_fields() {
+        let report = base_report();
+        let out = format_analysis_report(&report);
+        assert!(out.contains("LsbImage"), "technique should appear");
+        assert!(out.contains("1024 bytes"), "capacity should appear");
+        assert!(out.contains("3.14 dB"), "chi-square should appear");
+        assert!(out.contains("Low"), "risk should appear");
+        assert!(out.contains("512 bytes"), "recommended max should appear");
+    }
+
+    #[test]
+    fn format_report_omits_spectral_section_when_none() {
+        let report = base_report();
+        let out = format_analysis_report(&report);
+        assert!(
+            !out.contains("Spectral Detectability"),
+            "spectral section must be absent when score is None"
+        );
+    }
+
+    #[test]
+    fn format_report_includes_spectral_section_when_present() {
+        let mut report = base_report();
+        report.spectral_score = Some(SpectralScore {
+            phase_coherence_drop: 0.1234,
+            carrier_snr_drop_db: -2.5,
+            sample_pair_asymmetry: 0.0081,
+            combined_risk: DetectabilityRisk::Medium,
+        });
+        let out = format_analysis_report(&report);
+        assert!(
+            out.contains("Spectral Detectability"),
+            "section header must appear"
+        );
+        assert!(out.contains("0.1234"), "phase coherence drop should appear");
+        assert!(out.contains("-2.50 dB"), "SNR drop should appear");
+        assert!(
+            out.contains("0.0081"),
+            "sample-pair asymmetry should appear"
+        );
+        assert!(out.contains("Medium"), "spectral risk should appear");
+    }
+
+    #[test]
+    fn format_report_spectral_does_not_bleed_into_core_output() {
+        let report = base_report();
+        let out = format_analysis_report(&report);
+        // Core fields still present even without spectral score
+        assert!(out.contains("Technique"));
+        assert!(out.contains("Chi-square"));
+        assert!(out.contains("Recommended"));
     }
 }
