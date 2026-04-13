@@ -300,7 +300,7 @@ impl DistributeService {
                 let original_covers = original_covers_opt.unwrap_or_default();
                 distributed
                     .into_iter()
-                    .zip(original_covers.into_iter())
+                    .zip(original_covers)
                     .map(|(stego, original)| {
                         deps.optimiser
                             .optimise(stego, &original, *max_detectability_db)
