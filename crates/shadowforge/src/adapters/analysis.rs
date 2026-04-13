@@ -50,6 +50,7 @@ impl CapacityAnalyser for CapacityAnalyserImpl {
             chi_square_score: chi_sq,
             detectability_risk: risk,
             recommended_max_payload_bytes: recommended,
+            spectral_score: None,
         })
     }
 }

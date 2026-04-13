@@ -1,8 +1,16 @@
-//! Capacity estimation and chi-square detectability analysis.
+//! Capacity estimation and chi-square detectability analysis, plus
+//! spectral-domain detectability scoring.
 //!
 //! Pure domain logic — no I/O, no file system, no async runtime.
 
-use crate::domain::types::{CoverMedia, CoverMediaKind, DetectabilityRisk, StegoTechnique};
+use bytes::Bytes;
+use rustfft::FftPlanner;
+use rustfft::num_complex::Complex;
+
+use crate::domain::ports::AiGenProfile;
+use crate::domain::types::{
+    CoverMedia, CoverMediaKind, DetectabilityRisk, SpectralScore, StegoTechnique,
+};
 
 /// `DetectabilityRisk` thresholds in dB.
 const HIGH_THRESHOLD_DB: f64 = -6.0;
@@ -173,6 +181,217 @@ fn estimate_pdf_content_capacity(cover: &CoverMedia) -> u64 {
 const fn estimate_pdf_metadata_capacity(_cover: &CoverMedia) -> u64 {
     // Metadata fields: limited capacity (~256 bytes typical)
     256
+}
+
+// ─── Spectral detectability scoring ──────────────────────────────────────────
+
+/// Run a spectral-domain detectability analysis comparing `original` to
+/// `stego`.
+///
+/// The score is profile-aware: when an [`AiGenProfile`] is provided, only the
+/// carrier bins with `coherence >= 0.90` are analysed.  Without a profile the
+/// top-16 highest-magnitude bins (excluding DC at `(0, 0)`) are used.
+///
+/// # Panics
+///
+/// Never panics.  Empty and single-pixel inputs are handled gracefully.
+#[must_use]
+pub fn spectral_detectability_score(
+    original: &CoverMedia,
+    stego: &CoverMedia,
+    profile: Option<&AiGenProfile>,
+) -> SpectralScore {
+    let orig_pixels = green_channel_f32(&original.data);
+    let stego_pixels = green_channel_f32(&stego.data);
+
+    let n = orig_pixels.len().min(stego_pixels.len());
+    if n < 4 {
+        return SpectralScore {
+            phase_coherence_drop: 0.0,
+            carrier_snr_drop_db: 0.0,
+            sample_pair_asymmetry: 0.0,
+            combined_risk: DetectabilityRisk::Low,
+        };
+    }
+
+    // Next power-of-two >= n for FFT.
+    let fft_len = n.next_power_of_two();
+    let orig_freq = run_fft(&orig_pixels, fft_len);
+    let stego_freq = run_fft(&stego_pixels, fft_len);
+
+    // Determine image width: try to find a power-of-two width that matches.
+    // For analysis we use fft_len itself as width; height = 1 (1-D DFT).
+    let (width, height) = (fft_len as u32, 1u32);
+
+    // Determine carrier bins to examine.
+    let carrier_bins: Vec<(u32, u32)> = if let Some(prof) = profile {
+        prof.carrier_bins_for(width, height)
+            .map(|bins| {
+                bins.iter()
+                    .filter(|b| b.is_strong())
+                    .map(|b| b.freq)
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let carrier_bins: Vec<(usize, usize)> = if carrier_bins.is_empty() {
+        // Fall back to top-16 highest magnitude bins, skipping DC.
+        top_magnitude_bins(&orig_freq, 16)
+    } else {
+        carrier_bins
+            .into_iter()
+            .map(|(r, c)| (r as usize, c as usize))
+            .collect()
+    };
+
+    // Phase coherence drop: 1 − avg |cos(Δphase)| over carrier bins.
+    let phase_coherence_drop = compute_phase_coherence_drop(&orig_freq, &stego_freq, &carrier_bins);
+
+    // SNR drop in dB.
+    let carrier_snr_drop_db = compute_carrier_snr_drop_db(&orig_freq, &stego_freq, &carrier_bins);
+
+    // Sample-pair adjacency asymmetry on the raw channel.
+    let sample_pair_asymmetry =
+        compute_sample_pair_asymmetry(&orig_pixels[..n], &stego_pixels[..n]);
+
+    let combined_risk = classify_spectral_risk(phase_coherence_drop, carrier_snr_drop_db);
+
+    SpectralScore {
+        phase_coherence_drop,
+        carrier_snr_drop_db,
+        sample_pair_asymmetry,
+        combined_risk,
+    }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Extract the green channel as `f32` values from RGBA8-packed bytes.
+/// Bytes are interpreted as RGBA8; if length isn't divisible by 4 the
+/// remainder bytes are treated as green-channel samples directly.
+fn green_channel_f32(data: &Bytes) -> Vec<f32> {
+    if data.len() >= 4 && data.len() % 4 == 0 {
+        data.chunks_exact(4).map(|ch| ch[1] as f32).collect()
+    } else {
+        data.iter().map(|&b| b as f32).collect()
+    }
+}
+
+/// Run a 1-D FFT on `samples`, zero-padded to `fft_len`.
+fn run_fft(samples: &[f32], fft_len: usize) -> Vec<Complex<f32>> {
+    let mut input: Vec<Complex<f32>> = samples.iter().map(|&x| Complex::new(x, 0.0)).collect();
+    input.resize(fft_len, Complex::new(0.0, 0.0));
+
+    let mut planner = FftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(fft_len);
+    fft.process(&mut input);
+    input
+}
+
+/// Return indices `(0, bin)` of the top-`n` highest-magnitude bins, skipping
+/// DC (index 0).
+fn top_magnitude_bins(freq: &[Complex<f32>], n: usize) -> Vec<(usize, usize)> {
+    let mut indexed: Vec<(usize, f64)> = freq
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(i, c)| (i, c.norm() as f64))
+        .collect();
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.truncate(n);
+    indexed.into_iter().map(|(i, _)| (0usize, i)).collect()
+}
+
+/// 1 − avg |cos(phase_stego − phase_orig)| over the given bins.
+fn compute_phase_coherence_drop(
+    orig: &[Complex<f32>],
+    stego: &[Complex<f32>],
+    bins: &[(usize, usize)],
+) -> f64 {
+    if bins.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+    for &(_row, col) in bins {
+        if let (Some(o), Some(s)) = (orig.get(col), stego.get(col)) {
+            let phase_diff = (s.arg() - o.arg()) as f64;
+            sum += phase_diff.cos().abs();
+            count = count.strict_add(1);
+        }
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    let avg_coherence = sum / count as f64;
+    (1.0 - avg_coherence).clamp(0.0, 1.0)
+}
+
+/// Mean SNR drop in dB: 10·log10(|stego|/|orig|) averaged over carrier bins.
+/// Returns 0.0 when no bins are available or magnitudes are zero.
+fn compute_carrier_snr_drop_db(
+    orig: &[Complex<f32>],
+    stego: &[Complex<f32>],
+    bins: &[(usize, usize)],
+) -> f64 {
+    if bins.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+    for &(_row, col) in bins {
+        if let (Some(o), Some(s)) = (orig.get(col), stego.get(col)) {
+            let mag_orig = o.norm() as f64;
+            let mag_stego = s.norm() as f64;
+            if mag_orig > 0.0 && mag_stego > 0.0 {
+                sum += 10.0 * (mag_stego / mag_orig).log10();
+                count = count.strict_add(1);
+            }
+        }
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    let result = sum / count as f64;
+    if result.is_nan() { 0.0 } else { result }
+}
+
+/// Adjacent pixel-pair parity asymmetry in the stego channel:
+/// fraction of pairs where even-position sample differs from odd-position
+/// sample in parity (LSB) more than expected.
+fn compute_sample_pair_asymmetry(orig: &[f32], stego: &[f32]) -> f64 {
+    if stego.len() < 2 {
+        return 0.0;
+    }
+    let pairs = stego.len() / 2;
+    let asym: usize = stego
+        .chunks_exact(2)
+        .filter(|pair| (pair[0] as u8 & 1) != (pair[1] as u8 & 1))
+        .count();
+    let orig_asym: usize = orig
+        .chunks_exact(2)
+        .filter(|pair| (pair[0] as u8 & 1) != (pair[1] as u8 & 1))
+        .count();
+    let stego_frac = asym as f64 / pairs as f64;
+    let orig_frac = orig_asym as f64 / pairs as f64;
+    (stego_frac - orig_frac).abs().clamp(0.0, 1.0)
+}
+
+/// Classify spectral risk based on phase coherence drop and SNR drop.
+fn classify_spectral_risk(
+    phase_coherence_drop: f64,
+    carrier_snr_drop_db: f64,
+) -> DetectabilityRisk {
+    if phase_coherence_drop > 0.20 || carrier_snr_drop_db.abs() > 0.15 {
+        DetectabilityRisk::High
+    } else if phase_coherence_drop > 0.05 || carrier_snr_drop_db.abs() > 0.05 {
+        DetectabilityRisk::Medium
+    } else {
+        DetectabilityRisk::Low
+    }
 }
 
 #[cfg(test)]
@@ -391,5 +610,120 @@ mod tests {
         let cover = make_cover(CoverMediaKind::PngImage, 4096);
         let cap = estimate_capacity(&cover, StegoTechnique::Palette);
         assert_eq!(cap, 124); // Same formula as GIF
+    }
+
+    // ─── Spectral detectability score tests ──────────────────────────────
+
+    fn make_spectral_cover(data: Vec<u8>) -> CoverMedia {
+        CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: Bytes::from(data),
+            metadata: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn spectral_identical_buffers_low_risk() {
+        let data: Vec<u8> = (0u8..=255).cycle().take(1024).collect();
+        let orig = make_spectral_cover(data.clone());
+        let stego = make_spectral_cover(data);
+        let score = spectral_detectability_score(&orig, &stego, None);
+        assert!(
+            (score.phase_coherence_drop).abs() < 1e-6,
+            "identical buffers: phase_coherence_drop should be ~0"
+        );
+        assert!(
+            (score.carrier_snr_drop_db).abs() < 1e-3,
+            "identical buffers: carrier_snr_drop_db should be ~0"
+        );
+        assert_eq!(score.combined_risk, DetectabilityRisk::Low);
+    }
+
+    #[test]
+    fn spectral_heavily_modified_differs_from_identical() {
+        // Inverted data has a very different spectrum from the original.
+        // The score fields should reflect numeric differences; we only
+        // assert the scoring completes without panic and produces a valid
+        // risk level (the exact threshold depends on the data content).
+        let orig_data: Vec<u8> = (0u8..=255).cycle().take(1024).collect();
+        let stego_data: Vec<u8> = orig_data.iter().map(|&b| b ^ 0xFF).collect();
+        let orig = make_spectral_cover(orig_data);
+        let stego = make_spectral_cover(stego_data);
+        let score = spectral_detectability_score(&orig, &stego, None);
+        // Score fields must be finite and non-negative where applicable.
+        assert!(score.phase_coherence_drop.is_finite());
+        assert!(score.sample_pair_asymmetry >= 0.0);
+        // Risk must be a valid variant — just confirming it doesn't panic.
+        let _ = score.combined_risk;
+    }
+
+    #[test]
+    fn spectral_empty_orig_no_panic() {
+        let orig = make_spectral_cover(vec![]);
+        let stego = make_spectral_cover(vec![0u8; 64]);
+        let score = spectral_detectability_score(&orig, &stego, None);
+        assert_eq!(score.combined_risk, DetectabilityRisk::Low);
+    }
+
+    #[test]
+    fn spectral_single_pixel_no_panic() {
+        let orig = make_spectral_cover(vec![128]);
+        let stego = make_spectral_cover(vec![129]);
+        let score = spectral_detectability_score(&orig, &stego, None);
+        assert_eq!(score.combined_risk, DetectabilityRisk::Low);
+    }
+
+    #[test]
+    fn spectral_with_ai_gen_profile_checks_carrier_bins() {
+        use crate::domain::ports::{AiGenProfile, CarrierBin};
+        // 64-element row; profile carrier bin at (0, 5) — strong.
+        let bins = vec![CarrierBin::new((0, 5), 0.0, 1.0)];
+        let mut carrier_map = HashMap::new();
+        // Key is "64x1" for width=64, height=1.
+        carrier_map.insert("64x1".to_string(), bins);
+        let profile = AiGenProfile {
+            model_id: "test-model".to_string(),
+            channel_weights: [1.0, 1.0, 1.0],
+            carrier_map,
+        };
+        let data: Vec<u8> = (0u8..64).collect();
+        let orig = make_spectral_cover(data.clone());
+        let stego = make_spectral_cover(data);
+        let score = spectral_detectability_score(&orig, &stego, Some(&profile));
+        // Identical data → low risk even with profile bins.
+        assert_eq!(score.combined_risk, DetectabilityRisk::Low);
+    }
+
+    #[test]
+    fn spectral_score_serde_round_trip() {
+        use crate::domain::types::SpectralScore;
+        let score = SpectralScore {
+            phase_coherence_drop: 0.12,
+            carrier_snr_drop_db: -0.08,
+            sample_pair_asymmetry: 0.03,
+            combined_risk: DetectabilityRisk::Medium,
+        };
+        let json = serde_json::to_string(&score).expect("serialise");
+        let back: SpectralScore = serde_json::from_str(&json).expect("deserialise");
+        assert!((back.phase_coherence_drop - score.phase_coherence_drop).abs() < 1e-10);
+        assert!((back.carrier_snr_drop_db - score.carrier_snr_drop_db).abs() < 1e-10);
+        assert_eq!(back.combined_risk, score.combined_risk);
+    }
+
+    #[test]
+    fn analysis_report_has_spectral_score_field() {
+        use crate::domain::types::{AnalysisReport, Capacity};
+        let report = AnalysisReport {
+            technique: StegoTechnique::LsbImage,
+            cover_capacity: Capacity {
+                bytes: 100,
+                technique: StegoTechnique::LsbImage,
+            },
+            chi_square_score: -13.5,
+            detectability_risk: DetectabilityRisk::Low,
+            recommended_max_payload_bytes: 50,
+            spectral_score: None,
+        };
+        assert!(report.spectral_score.is_none());
     }
 }

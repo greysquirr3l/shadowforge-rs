@@ -676,11 +676,29 @@ fn cmd_corpus(args: &cli::CorpusArgs) -> Result<(), AppError> {
             input,
             technique,
             top,
+            model,
+            resolution,
         } => {
             let data = fs_read(input)?;
             let payload = Payload::from_bytes(data);
             let tech = resolve_technique(*technique);
-            let results = index.search(&payload, tech, *top)?;
+
+            // If --model is provided, use model-aware search.
+            let results = if let Some(model_id) = model {
+                let res = resolution
+                    .as_deref()
+                    .and_then(|s| {
+                        let mut parts = s.splitn(2, 'x');
+                        let w = parts.next()?.parse::<u32>().ok()?;
+                        let h = parts.next()?.parse::<u32>().ok()?;
+                        Some((w, h))
+                    })
+                    .unwrap_or((0, 0));
+                index.search_for_model(&payload, model_id, res, *top)?
+            } else {
+                index.search(&payload, tech, *top)?
+            };
+
             for entry in &results {
                 println!("{}", entry.path);
             }

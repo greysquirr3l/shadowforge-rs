@@ -1,0 +1,22 @@
+{
+  "profiles": [
+    {
+      "model_id": "gemini",
+      "channel_weights": [0.85, 1.0, 0.7],
+      "carrier_map": {
+        "1024x1024": [
+          { "freq": [9, 9], "phase": 0.0, "coherence": 1.0 },
+          { "freq": [5, 5], "phase": 0.0, "coherence": 1.0 },
+          { "freq": [10, 11], "phase": 0.0, "coherence": 1.0 },
+          { "freq": [13, 6], "phase": 0.0, "coherence": 0.82 }
+        ],
+        "1536x2816": [
+          { "freq": [768, 704], "phase": 0.0, "coherence": 0.9955 },
+          { "freq": [672, 1056], "phase": 0.0, "coherence": 0.9746 },
+          { "freq": [480, 1408], "phase": 0.0, "coherence": 0.9655 },
+          { "freq": [384, 1408], "phase": 0.0, "coherence": 0.9586 }
+        ]
+      }
+    }
+  ]
+}

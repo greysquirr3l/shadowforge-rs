@@ -480,6 +480,13 @@ pub enum CorpusSubcommand {
         /// Maximum results to return.
         #[arg(long, default_value = "5")]
         top: usize,
+        /// Restrict search to covers matching this AI model ID (e.g. "gemini").
+        #[arg(long)]
+        model: Option<String>,
+        /// Cover resolution to match when `--model` is set, in WIDTHxHEIGHT
+        /// format (e.g. "1024x1024").  Ignored if `--model` is absent.
+        #[arg(long)]
+        resolution: Option<String>,
     },
 }
 
