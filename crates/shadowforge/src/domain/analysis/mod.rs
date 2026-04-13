@@ -221,10 +221,11 @@ pub fn spectral_detectability_score(
 
     // Determine image width: try to find a power-of-two width that matches.
     // For analysis we use fft_len itself as width; height = 1 (1-D DFT).
-    let (width, height) = (fft_len as u32, 1u32);
+    let width = u32::try_from(fft_len).ok().map_or(u32::MAX, |v| v);
+    let height = 1u32;
 
     // Determine carrier bins to examine.
-    let carrier_bins: Vec<(u32, u32)> = if let Some(prof) = profile {
+    let carrier_bins: Vec<(u32, u32)> = profile.map_or_else(Vec::new, |prof| {
         prof.carrier_bins_for(width, height)
             .map(|bins| {
                 bins.iter()
@@ -233,9 +234,7 @@ pub fn spectral_detectability_score(
                     .collect()
             })
             .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    });
 
     let carrier_bins: Vec<(usize, usize)> = if carrier_bins.is_empty() {
         // Fall back to top-16 highest magnitude bins, skipping DC.
@@ -254,8 +253,10 @@ pub fn spectral_detectability_score(
     let carrier_snr_drop_db = compute_carrier_snr_drop_db(&orig_freq, &stego_freq, &carrier_bins);
 
     // Sample-pair adjacency asymmetry on the raw channel.
-    let sample_pair_asymmetry =
-        compute_sample_pair_asymmetry(&orig_pixels[..n], &stego_pixels[..n]);
+    let sample_pair_asymmetry = match (orig_pixels.get(..n), stego_pixels.get(..n)) {
+        (Some(orig), Some(stego)) => compute_sample_pair_asymmetry(orig, stego),
+        _ => 0.0,
+    };
 
     let combined_risk = classify_spectral_risk(phase_coherence_drop, carrier_snr_drop_db);
 
@@ -273,10 +274,15 @@ pub fn spectral_detectability_score(
 /// Bytes are interpreted as RGBA8; if length isn't divisible by 4 the
 /// remainder bytes are treated as green-channel samples directly.
 fn green_channel_f32(data: &Bytes) -> Vec<f32> {
-    if data.len() >= 4 && data.len() % 4 == 0 {
-        data.chunks_exact(4).map(|ch| ch[1] as f32).collect()
+    if data.len() >= 4 && data.len().is_multiple_of(4) {
+        data.chunks_exact(4)
+            .filter_map(|ch| match ch {
+                [_, g, _, _] => Some(f32::from(*g)),
+                _ => None,
+            })
+            .collect()
     } else {
-        data.iter().map(|&b| b as f32).collect()
+        data.iter().map(|&b| f32::from(b)).collect()
     }
 }
 
@@ -298,14 +304,14 @@ fn top_magnitude_bins(freq: &[Complex<f32>], n: usize) -> Vec<(usize, usize)> {
         .iter()
         .enumerate()
         .skip(1)
-        .map(|(i, c)| (i, c.norm() as f64))
+        .map(|(i, c)| (i, f64::from(c.norm())))
         .collect();
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     indexed.truncate(n);
     indexed.into_iter().map(|(i, _)| (0usize, i)).collect()
 }
 
-/// 1 − avg |cos(phase_stego − phase_orig)| over the given bins.
+/// `1 - avg(|cos(phase_stego - phase_orig)|)` over the given bins.
 fn compute_phase_coherence_drop(
     orig: &[Complex<f32>],
     stego: &[Complex<f32>],
@@ -318,7 +324,7 @@ fn compute_phase_coherence_drop(
     let mut count = 0usize;
     for &(_row, col) in bins {
         if let (Some(o), Some(s)) = (orig.get(col), stego.get(col)) {
-            let phase_diff = (s.arg() - o.arg()) as f64;
+            let phase_diff = f64::from(s.arg() - o.arg());
             sum += phase_diff.cos().abs();
             count = count.strict_add(1);
         }
@@ -326,7 +332,11 @@ fn compute_phase_coherence_drop(
     if count == 0 {
         return 0.0;
     }
-    let avg_coherence = sum / count as f64;
+    let count_f = match u32::try_from(count) {
+        Ok(v) => f64::from(v),
+        Err(_) => return 0.0,
+    };
+    let avg_coherence = sum / count_f;
     (1.0 - avg_coherence).clamp(0.0, 1.0)
 }
 
@@ -344,8 +354,8 @@ fn compute_carrier_snr_drop_db(
     let mut count = 0usize;
     for &(_row, col) in bins {
         if let (Some(o), Some(s)) = (orig.get(col), stego.get(col)) {
-            let mag_orig = o.norm() as f64;
-            let mag_stego = s.norm() as f64;
+            let mag_orig = f64::from(o.norm());
+            let mag_stego = f64::from(s.norm());
             if mag_orig > 0.0 && mag_stego > 0.0 {
                 sum += 10.0 * (mag_stego / mag_orig).log10();
                 count = count.strict_add(1);
@@ -355,7 +365,11 @@ fn compute_carrier_snr_drop_db(
     if count == 0 {
         return 0.0;
     }
-    let result = sum / count as f64;
+    let count_f = match u32::try_from(count) {
+        Ok(v) => f64::from(v),
+        Err(_) => return 0.0,
+    };
+    let result = sum / count_f;
     if result.is_nan() { 0.0 } else { result }
 }
 
@@ -366,18 +380,43 @@ fn compute_sample_pair_asymmetry(orig: &[f32], stego: &[f32]) -> f64 {
     if stego.len() < 2 {
         return 0.0;
     }
+
     let pairs = stego.len() / 2;
     let asym: usize = stego
         .chunks_exact(2)
-        .filter(|pair| (pair[0] as u8 & 1) != (pair[1] as u8 & 1))
+        .filter(|pair| match pair {
+            [a, b] => sample_is_odd(*a) != sample_is_odd(*b),
+            _ => false,
+        })
         .count();
     let orig_asym: usize = orig
         .chunks_exact(2)
-        .filter(|pair| (pair[0] as u8 & 1) != (pair[1] as u8 & 1))
+        .filter(|pair| match pair {
+            [a, b] => sample_is_odd(*a) != sample_is_odd(*b),
+            _ => false,
+        })
         .count();
-    let stego_frac = asym as f64 / pairs as f64;
-    let orig_frac = orig_asym as f64 / pairs as f64;
+    let pairs_f = match u32::try_from(pairs) {
+        Ok(v) if v > 0 => f64::from(v),
+        _ => return 0.0,
+    };
+    let asym_f = match u32::try_from(asym) {
+        Ok(v) => f64::from(v),
+        Err(_) => return 0.0,
+    };
+    let orig_asym_f = match u32::try_from(orig_asym) {
+        Ok(v) => f64::from(v),
+        Err(_) => return 0.0,
+    };
+    let stego_frac = asym_f / pairs_f;
+    let orig_frac = orig_asym_f / pairs_f;
     (stego_frac - orig_frac).abs().clamp(0.0, 1.0)
+}
+
+fn sample_is_odd(sample: f32) -> bool {
+    // Samples are originally byte-derived channel values represented as f32.
+    // Using float parity avoids lossy integer casts that violate strict lints.
+    sample.rem_euclid(2.0) >= 1.0
 }
 
 /// Classify spectral risk based on phase coherence drop and SNR drop.
@@ -703,8 +742,16 @@ mod tests {
             sample_pair_asymmetry: 0.03,
             combined_risk: DetectabilityRisk::Medium,
         };
-        let json = serde_json::to_string(&score).expect("serialise");
-        let back: SpectralScore = serde_json::from_str(&json).expect("deserialise");
+        let json = serde_json::to_string(&score);
+        assert!(json.is_ok());
+        let Some(json) = json.ok() else {
+            return;
+        };
+        let back: Result<SpectralScore, _> = serde_json::from_str(&json);
+        assert!(back.is_ok());
+        let Some(back) = back.ok() else {
+            return;
+        };
         assert!((back.phase_coherence_drop - score.phase_coherence_drop).abs() < 1e-10);
         assert!((back.carrier_snr_drop_db - score.carrier_snr_drop_db).abs() < 1e-10);
         assert_eq!(back.combined_risk, score.combined_risk);

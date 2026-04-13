@@ -65,9 +65,8 @@ impl CoverProfileMatcherImpl {
     pub fn with_built_in() -> Self {
         static BUILT_IN: LazyLock<Vec<AiGenProfile>> = LazyLock::new(|| {
             let raw = include_str!("ai_profiles.json");
-            let book: ProfileCodebook =
-                serde_json::from_str(raw).expect("bundled ai_profiles.json must be valid JSON");
-            book.profiles
+            serde_json::from_str::<ProfileCodebook>(raw)
+                .map_or_else(|_| Vec::new(), |book| book.profiles)
         });
         Self {
             ai_profiles: BUILT_IN.clone(),
@@ -104,33 +103,31 @@ impl CoverProfileMatcher for CoverProfileMatcherImpl {
 
         // Try each AI profile — pick the one with the most coherent carriers.
         let best_ai = self.ai_profiles.iter().max_by_key(|p| {
-            let bins = p.carrier_bins_for(width, height).unwrap_or(&[]);
-            let strong_count = bins
-                .iter()
+            let bins = p.carrier_bins_for(width, height).map_or(&[][..], |v| v);
+            bins.iter()
                 .filter(|b| b.is_strong())
                 .filter(|b| {
                     let idx = b.freq.1 as usize;
-                    if let Some(c) = freq.get(idx) {
-                        // Phase within π/8 of expected.
-                        let phase_diff = (c.arg() as f64 - b.phase).abs();
+                    // Phase within π/8 of expected.
+                    freq.get(idx).is_some_and(|c| {
+                        let phase_diff = (f64::from(c.arg()) - b.phase).abs();
                         phase_diff < std::f64::consts::PI / 8.0
-                    } else {
-                        false
-                    }
+                    })
                 })
-                .count();
-            strong_count
+                .count()
         });
 
         if let Some(profile) = best_ai {
-            let bins = profile.carrier_bins_for(width, height).unwrap_or(&[]);
+            let bins = profile
+                .carrier_bins_for(width, height)
+                .map_or(&[][..], |v| v);
             let matching: usize = bins
                 .iter()
                 .filter(|b| b.is_strong())
                 .filter(|b| {
                     let idx = b.freq.1 as usize;
-                    freq.get(idx).map_or(false, |c| {
-                        (c.arg() as f64 - b.phase).abs() < std::f64::consts::PI / 8.0
+                    freq.get(idx).is_some_and(|c| {
+                        (f64::from(c.arg()) - b.phase).abs() < std::f64::consts::PI / 8.0
                     })
                 })
                 .count();
@@ -212,17 +209,12 @@ impl AdaptiveOptimiser for AdaptiveOptimiserImpl {
             .unwrap_or(1);
 
         let profile = self.matcher.profile_for(&stego);
-        let mask = BinMask::build(
-            profile
-                .as_ref()
-                .unwrap_or(&CoverProfile::Camera(CameraProfile {
-                    quantisation_table: vec![],
-                    noise_floor_db: -80.0,
-                    model_id: "fallback".to_string(),
-                })),
-            width,
-            height,
-        );
+        let fallback_profile = CoverProfile::Camera(CameraProfile {
+            quantisation_table: vec![],
+            noise_floor_db: -80.0,
+            model_id: "fallback".to_string(),
+        });
+        let mask = BinMask::build(profile.as_ref().unwrap_or(&fallback_profile), width, height);
 
         let config = SearchConfig {
             max_iterations: self.config.max_iterations,
@@ -230,11 +222,14 @@ impl AdaptiveOptimiser for AdaptiveOptimiserImpl {
         };
 
         // Derive deterministic seed from first 8 bytes of the stego data.
-        let seed = stego
-            .data
-            .get(..8)
-            .map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
-            .unwrap_or(0);
+        let seed = stego.data.get(..8).map_or_else(
+            || 0,
+            |bytes| {
+                let mut seed_bytes = [0u8; 8];
+                seed_bytes.copy_from_slice(bytes);
+                u64::from_le_bytes(seed_bytes)
+            },
+        );
 
         let mut data = stego.data.to_vec();
         let perm = permutation_search(&data, &mask, &config, seed);
@@ -250,36 +245,17 @@ impl AdaptiveOptimiser for AdaptiveOptimiserImpl {
 #[derive(Debug, Clone, Copy)]
 struct PlatformSettings {
     jpeg_quality: u8,
-    /// Minimum capacity that survives recompression (bytes, rough estimate).
-    survivable_fraction: f64,
 }
 
 impl PlatformSettings {
     const fn for_platform(platform: &PlatformProfile) -> Self {
         match platform {
-            PlatformProfile::Instagram => Self {
-                jpeg_quality: 82,
-                survivable_fraction: 0.40,
-            },
-            PlatformProfile::Twitter => Self {
-                jpeg_quality: 75,
-                survivable_fraction: 0.30,
-            },
-            PlatformProfile::WhatsApp => Self {
-                jpeg_quality: 85,
-                survivable_fraction: 0.45,
-            },
-            PlatformProfile::Telegram => Self {
-                jpeg_quality: 95,
-                survivable_fraction: 0.70,
-            },
-            PlatformProfile::Imgur => Self {
-                jpeg_quality: 85,
-                survivable_fraction: 0.45,
-            },
+            PlatformProfile::Instagram => Self { jpeg_quality: 82 },
+            PlatformProfile::Twitter => Self { jpeg_quality: 75 },
+            PlatformProfile::WhatsApp | PlatformProfile::Imgur => Self { jpeg_quality: 85 },
+            PlatformProfile::Telegram => Self { jpeg_quality: 95 },
             PlatformProfile::Custom { quality, .. } => Self {
                 jpeg_quality: *quality,
-                survivable_fraction: 0.40,
             },
         }
     }
@@ -334,19 +310,23 @@ impl CompressionSimulator for CompressionSimulatorImpl {
         let mut encoded: Vec<u8> = Vec::new();
         {
             let mut cursor = Cursor::new(&mut encoded);
-            let mut encoder =
+            let mut jpeg_encoder =
                 image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
-            image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(w, h, &pixels[..expected_len])
-                .ok_or_else(|| AdaptiveError::CompressionSimFailed {
-                    reason: "invalid pixel dimensions".to_string(),
-                })
-                .and_then(|buf| {
-                    encoder
-                        .encode(buf.as_raw(), w, h, image::ExtendedColorType::Rgb8)
-                        .map_err(|e| AdaptiveError::CompressionSimFailed {
-                            reason: format!("JPEG encode failed: {e}"),
-                        })
-                })?;
+            image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
+                w,
+                h,
+                pixels.get(..expected_len).unwrap_or(&[]),
+            )
+            .ok_or_else(|| AdaptiveError::CompressionSimFailed {
+                reason: "invalid pixel dimensions".to_string(),
+            })
+            .and_then(|buf| {
+                jpeg_encoder
+                    .encode(buf.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+                    .map_err(|e| AdaptiveError::CompressionSimFailed {
+                        reason: format!("JPEG encode failed: {e}"),
+                    })
+            })?;
         }
 
         // Decode back.
@@ -355,7 +335,7 @@ impl CompressionSimulator for CompressionSimulatorImpl {
                 reason: format!("JPEG decode failed: {e}"),
             })?;
         let rgb = decoded.to_rgb8();
-        let mut out_meta = cover.metadata.clone();
+        let mut out_meta = cover.metadata;
         out_meta.insert("width".to_string(), w.to_string());
         out_meta.insert("height".to_string(), h.to_string());
 
@@ -371,9 +351,14 @@ impl CompressionSimulator for CompressionSimulatorImpl {
         cover: &CoverMedia,
         platform: &PlatformProfile,
     ) -> Result<Capacity, AdaptiveError> {
-        let settings = PlatformSettings::for_platform(platform);
         let total_bytes = cover.data.len() as u64;
-        let survivable = ((total_bytes as f64) * settings.survivable_fraction) as u64;
+        let basis_points: u64 = match platform {
+            PlatformProfile::Instagram | PlatformProfile::Custom { .. } => 4000,
+            PlatformProfile::Twitter => 3000,
+            PlatformProfile::WhatsApp | PlatformProfile::Imgur => 4500,
+            PlatformProfile::Telegram => 7000,
+        };
+        let survivable = total_bytes.saturating_mul(basis_points).div_euclid(10_000);
         Ok(Capacity {
             bytes: survivable,
             technique: StegoTechnique::LsbImage,
@@ -389,16 +374,26 @@ fn extract_green_f32(data: &Bytes, width: u32, height: u32) -> Vec<f32> {
         .saturating_mul(4);
     if data.len() >= expected {
         // RGBA8
-        data.chunks_exact(4).map(|ch| ch[1] as f32).collect()
+        data.chunks_exact(4)
+            .filter_map(|ch| match ch {
+                [_, g, _, _] => Some(f32::from(*g)),
+                _ => None,
+            })
+            .collect()
     } else if data.len()
         >= (width as usize)
             .saturating_mul(height as usize)
             .saturating_mul(3)
     {
         // RGB8
-        data.chunks_exact(3).map(|ch| ch[1] as f32).collect()
+        data.chunks_exact(3)
+            .filter_map(|ch| match ch {
+                [_, g, _] => Some(f32::from(*g)),
+                _ => None,
+            })
+            .collect()
     } else {
-        data.iter().map(|&b| b as f32).collect()
+        data.iter().map(|&b| f32::from(b)).collect()
     }
 }
 
@@ -434,7 +429,9 @@ mod tests {
     fn built_in_codebook_parses_without_error() {
         let matcher = CoverProfileMatcherImpl::with_built_in();
         assert!(!matcher.ai_profiles.is_empty());
-        assert_eq!(matcher.ai_profiles[0].model_id, "gemini");
+        let first = matcher.ai_profiles.first();
+        assert!(first.is_some());
+        assert_eq!(first.map(|p| p.model_id.as_str()), Some("gemini"));
     }
 
     #[test]
@@ -470,7 +467,11 @@ mod tests {
             noise_floor_db: -80.0,
             model_id: "test".to_string(),
         });
-        let result = matcher.apply_profile(cover.clone(), &profile).unwrap();
+        let result = matcher.apply_profile(cover.clone(), &profile);
+        assert!(result.is_ok());
+        let Some(result) = result.ok() else {
+            return;
+        };
         assert_eq!(result.data, cover.data);
     }
 
@@ -489,7 +490,11 @@ mod tests {
         let cover = make_cover(CoverMediaKind::PngImage, 4, 4);
         let stego = make_cover(CoverMediaKind::PngImage, 4, 4);
         let original_len = stego.data.len();
-        let result = optimiser.optimise(stego, &cover, -12.0).unwrap();
+        let result = optimiser.optimise(stego, &cover, -12.0);
+        assert!(result.is_ok());
+        let Some(result) = result.ok() else {
+            return;
+        };
         assert_eq!(result.data.len(), original_len);
     }
 
@@ -497,9 +502,11 @@ mod tests {
     fn compression_simulator_survivable_capacity() {
         let sim = CompressionSimulatorImpl;
         let cover = make_cover(CoverMediaKind::PngImage, 32, 32);
-        let cap = sim
-            .survivable_capacity(&cover, &PlatformProfile::Instagram)
-            .unwrap();
+        let cap = sim.survivable_capacity(&cover, &PlatformProfile::Instagram);
+        assert!(cap.is_ok());
+        let Some(cap) = cap.ok() else {
+            return;
+        };
         assert!(cap.bytes > 0);
         assert!(cap.bytes < cover.data.len() as u64);
     }
@@ -517,9 +524,11 @@ mod tests {
                 m
             },
         };
-        let result = sim
-            .simulate(cover.clone(), &PlatformProfile::Twitter)
-            .unwrap();
+        let result = sim.simulate(cover.clone(), &PlatformProfile::Twitter);
+        assert!(result.is_ok());
+        let Some(result) = result.ok() else {
+            return;
+        };
         assert_eq!(result.data, cover.data);
     }
 
@@ -528,6 +537,19 @@ mod tests {
         let t = PlatformSettings::for_platform(&PlatformProfile::Telegram);
         let i = PlatformSettings::for_platform(&PlatformProfile::Twitter);
         assert!(t.jpeg_quality > i.jpeg_quality);
-        assert!(t.survivable_fraction > i.survivable_fraction);
+
+        let sim = CompressionSimulatorImpl;
+        let cover = make_cover(CoverMediaKind::PngImage, 32, 32);
+        let t_cap = sim.survivable_capacity(&cover, &PlatformProfile::Telegram);
+        let i_cap = sim.survivable_capacity(&cover, &PlatformProfile::Twitter);
+        assert!(t_cap.is_ok());
+        assert!(i_cap.is_ok());
+        let Some(t_cap) = t_cap.ok() else {
+            return;
+        };
+        let Some(i_cap) = i_cap.ok() else {
+            return;
+        };
+        assert!(t_cap.bytes > i_cap.bytes);
     }
 }

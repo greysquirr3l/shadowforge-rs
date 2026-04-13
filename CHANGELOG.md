@@ -8,6 +8,38 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Spectral adaptive embedding primitives** — introduced AI-generator-aware
+  profile vocabulary (`AiGenProfile`, `CarrierBin`, `CoverProfile`,
+  `SpectralKey`) to model known FFT carrier regions and resolution-specific
+  watermark behavior
+- **Adaptive bounded context implementation** — added
+  `domain/adaptive/mod.rs` with frequency-bin masking and STC-inspired
+  permutation search (`BinMask`, `SearchConfig`, `permutation_search`)
+- **Adaptive adapter implementations** — added `AdaptiveOptimiserImpl`,
+  `CoverProfileMatcherImpl`, and `CompressionSimulatorImpl` with bundled AI
+  profile codebook support
+- **Corpus spectral secondary index** — `CorpusIndex` now supports
+  model-aware lookup via `search_for_model` and index introspection via
+  `model_stats`
+- **Corpus CLI model filtering** — `corpus search` now accepts optional
+  `--model` and `--resolution` filters for generator-aware cover selection
+
+### Changed
+
+- **Analysis report extended** — `AnalysisReport` now includes optional
+  `spectral_score` alongside existing detectability metrics
+- **Corpus entry enrichment** — corpus indexing now records
+  `CorpusEntry::spectral_key` when generator profile matching succeeds,
+  enabling resolution-matched model bucketing
+
+### Testing
+
+- **Spectral/adaptive phase validated** — T36–T40 implementation passed full
+  workspace validation: 430 tests passing, 0 failures, and clippy clean with
+  0 warnings
+
 ## [0.2.0] — 2026-04-10
 
 ### Added

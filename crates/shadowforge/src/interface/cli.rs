@@ -483,7 +483,7 @@ pub enum CorpusSubcommand {
         /// Restrict search to covers matching this AI model ID (e.g. "gemini").
         #[arg(long)]
         model: Option<String>,
-        /// Cover resolution to match when `--model` is set, in WIDTHxHEIGHT
+        /// Cover resolution to match when `--model` is set, in `WIDTHxHEIGHT`
         /// format (e.g. "1024x1024").  Ignored if `--model` is absent.
         #[arg(long)]
         resolution: Option<String>,
