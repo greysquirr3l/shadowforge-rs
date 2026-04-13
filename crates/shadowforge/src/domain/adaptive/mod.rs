@@ -3,6 +3,7 @@
 //!
 //! Pure domain logic — no I/O, no file system, no async runtime.
 
+use rand::RngExt as _;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -27,28 +28,28 @@ impl BinMask {
     /// Build a bin-occupancy mask from `profile` at the given resolution.
     ///
     /// - `CoverProfile::Camera` → all-zeros (no protected bins).
-    /// - `CoverProfile::AiGenerator` → marks strong carrier bins (`coherence
-    ///   >= 0.90`).
+    /// - `CoverProfile::AiGenerator` → marks strong carrier bins
+    ///   (`coherence >= 0.90`).
     #[must_use]
     pub fn build(profile: &CoverProfile, width: u32, height: u32) -> Self {
         let len = (width as usize).strict_mul(height as usize);
         let mut occupied = vec![false; len];
 
-        if let CoverProfile::AiGenerator(p) = profile {
-            if let Some(bins) = p.carrier_bins_for(width, height) {
-                for bin in bins.iter().filter(|b| b.is_strong()) {
-                    let (row, col) = bin.freq;
-                    if row < height && col < width {
-                        let idx = (row as usize)
-                            .strict_mul(width as usize)
-                            .strict_add(col as usize);
-                        #[expect(
-                            clippy::indexing_slicing,
-                            reason = "idx < len is guaranteed by the row/col range check above"
-                        )]
-                        {
-                            occupied[idx] = true;
-                        }
+        if let CoverProfile::AiGenerator(p) = profile
+            && let Some(bins) = p.carrier_bins_for(width, height)
+        {
+            for bin in bins.iter().filter(|b| b.is_strong()) {
+                let (row, col) = bin.freq;
+                if row < height && col < width {
+                    let idx = (row as usize)
+                        .strict_mul(width as usize)
+                        .strict_add(col as usize);
+                    #[expect(
+                        clippy::indexing_slicing,
+                        reason = "idx < len is guaranteed by the row/col range check above"
+                    )]
+                    {
+                        occupied[idx] = true;
                     }
                 }
             }
@@ -81,7 +82,7 @@ impl BinMask {
 
     /// Total number of bins in the mask.
     #[must_use]
-    pub fn total_bins(&self) -> usize {
+    pub const fn total_bins(&self) -> usize {
         self.occupied.len()
     }
 }
@@ -99,8 +100,17 @@ pub fn cost_at(bit_position: usize, total_positions: usize, mask: &BinMask) -> f
         return f64::INFINITY;
     }
 
-    let col = (bit_position % mask.width as usize) as u32;
-    let row = (bit_position / mask.width.max(1) as usize) as u32;
+    let Ok(width) = usize::try_from(mask.width.max(1)) else {
+        return f64::INFINITY;
+    };
+    let col_usize = bit_position % width;
+    let row_usize = bit_position / width;
+    let Ok(col) = u32::try_from(col_usize) else {
+        return f64::INFINITY;
+    };
+    let Ok(row) = u32::try_from(row_usize) else {
+        return f64::INFINITY;
+    };
 
     if mask.is_occupied(row, col) {
         return f64::INFINITY;
@@ -109,7 +119,13 @@ pub fn cost_at(bit_position: usize, total_positions: usize, mask: &BinMask) -> f
     // Soft margin: positions near the boundary of occupied regions get a
     // slightly higher cost (up to 2.0).  We use the fractional position
     // within the image as a proxy for proximity to occupied areas.
-    let fraction = bit_position as f64 / total_positions as f64;
+    let bit_position_f = u32::try_from(bit_position)
+        .ok()
+        .map_or_else(|| f64::from(u32::MAX), f64::from);
+    let total_positions_f = u32::try_from(total_positions)
+        .ok()
+        .map_or_else(|| f64::from(u32::MAX), f64::from);
+    let fraction = bit_position_f / total_positions_f;
     1.0 + fraction.min(1.0)
 }
 
@@ -135,27 +151,25 @@ impl Permutation {
     /// Apply the permutation to `data` in-place (cycle-following algorithm).
     pub fn apply(&self, data: &mut [u8]) {
         let n = data.len().min(self.map.len());
-        let mut visited = vec![false; n];
+        let source = match data.get(..n) {
+            Some(slice) => slice.to_vec(),
+            None => return,
+        };
+        let mut dest = source.clone();
 
-        for start in 0..n {
-            if visited[start] || self.map.get(start).copied().unwrap_or(start) == start {
-                visited[start] = true;
+        for (original_position, &new_position) in self.map.iter().take(n).enumerate() {
+            if new_position >= n {
                 continue;
             }
-
-            // Follow the cycle collecting original values.
-            let saved = data[start];
-            let mut current = start;
-            loop {
-                let next = self.map.get(current).copied().unwrap_or(current);
-                visited[current] = true;
-                if next == start {
-                    data[current] = saved;
-                    break;
-                }
-                data[current] = data[next];
-                current = next;
+            if let (Some(dst), Some(&src)) =
+                (dest.get_mut(new_position), source.get(original_position))
+            {
+                *dst = src;
             }
+        }
+
+        if let Some(target) = data.get_mut(..n) {
+            target.copy_from_slice(&dest);
         }
     }
 
@@ -177,7 +191,7 @@ impl Permutation {
         Self { map: inv }
     }
 
-    /// Raw permutation map (original_position → new_position).
+    /// Raw permutation map (`original_position -> new_position`).
     #[must_use]
     pub fn as_slice(&self) -> &[usize] {
         &self.map
@@ -224,8 +238,6 @@ pub fn permutation_search(
         return Permutation::identity(stego_bytes.len());
     }
 
-    use rand::RngExt as _;
-
     let n = stego_bytes.len();
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut best_perm = Permutation::identity(n);
@@ -250,8 +262,10 @@ pub fn permutation_search(
         while idx_b == idx_a {
             idx_b = rng.random_range(0..safe_positions.len());
         }
-        let pos_a = safe_positions[idx_a];
-        let pos_b = safe_positions[idx_b];
+        let (Some(&pos_a), Some(&pos_b)) = (safe_positions.get(idx_a), safe_positions.get(idx_b))
+        else {
+            continue;
+        };
 
         // Tentatively swap in both the map and the data.
         current_map.swap(pos_a, pos_b);
@@ -283,8 +297,6 @@ mod tests {
     use super::*;
     use crate::domain::ports::{AiGenProfile, CarrierBin, CoverProfile};
     use std::collections::HashMap;
-
-    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     fn gemini_1024_profile() -> CoverProfile {
         let bins = vec![
@@ -408,13 +420,12 @@ mod tests {
     }
 
     #[test]
-    fn permutation_identity_apply_is_noop() -> TestResult {
+    fn permutation_identity_apply_is_noop() {
         let original = vec![1u8, 2, 3, 4];
         let mut data = original.clone();
         let perm = Permutation::identity(4);
         perm.apply(&mut data);
         assert_eq!(data, original);
-        Ok(())
     }
 
     #[test]

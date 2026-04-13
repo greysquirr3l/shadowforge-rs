@@ -115,9 +115,9 @@ pub fn filter_by_model<'a>(
     entries
         .iter()
         .filter(|e| {
-            e.spectral_key.as_ref().map_or(false, |k| {
-                k.model_id == model_id && k.resolution == resolution
-            })
+            e.spectral_key
+                .as_ref()
+                .is_some_and(|k| k.model_id == model_id && k.resolution == resolution)
         })
         .collect()
 }

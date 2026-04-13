@@ -391,7 +391,7 @@ pub struct CarrierBin {
 impl CarrierBin {
     /// Construct a `CarrierBin`, clamping `coherence` to `0.0..=1.0`.
     #[must_use]
-    pub fn new(freq: (u32, u32), phase: f64, coherence: f64) -> Self {
+    pub const fn new(freq: (u32, u32), phase: f64, coherence: f64) -> Self {
         Self {
             freq,
             phase,
@@ -401,7 +401,7 @@ impl CarrierBin {
 
     /// Return the (clamped) phase coherence value.
     #[must_use]
-    pub fn coherence(&self) -> f64 {
+    pub const fn coherence(&self) -> f64 {
         self.coherence
     }
 
@@ -857,13 +857,13 @@ mod cover_profile_tests {
     #[test]
     fn carrier_bin_coherence_clamped_above_one() {
         let bin = CarrierBin::new((9, 9), 0.0, 1.5);
-        assert_eq!(bin.coherence(), 1.0);
+        assert!((bin.coherence() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn carrier_bin_coherence_clamped_below_zero() {
         let bin = CarrierBin::new((9, 9), 0.0, -0.5);
-        assert_eq!(bin.coherence(), 0.0);
+        assert!((bin.coherence() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
