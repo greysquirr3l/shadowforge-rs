@@ -506,6 +506,28 @@ pub(crate) fn format_analysis_report(report: &crate::domain::types::AnalysisRepo
         "Recommended:   {} bytes",
         report.recommended_max_payload_bytes
     );
+    if let Some(ai) = &report.ai_watermark {
+        let _ = writeln!(out, "--- AI Watermark Detection ---");
+        let _ = writeln!(
+            out,
+            "  Detected:             {}",
+            if ai.detected { "yes" } else { "no" }
+        );
+        if let Some(model_id) = &ai.model_id {
+            let _ = writeln!(out, "  Model:                {model_id}");
+        }
+        if ai.total_strong_bins > 0 {
+            let _ = writeln!(out, "  Confidence:           {:.4}", ai.confidence);
+            let _ = writeln!(
+                out,
+                "  Matched strong bins:  {}/{}",
+                ai.matched_strong_bins,
+                ai.total_strong_bins
+            );
+        } else {
+            let _ = writeln!(out, "  Status:               no known profile match");
+        }
+    }
     if let Some(s) = &report.spectral_score {
         let _ = writeln!(out, "--- Spectral Detectability ---");
         let _ = writeln!(out, "  Phase coherence drop: {:.4}", s.phase_coherence_drop);
@@ -1603,7 +1625,8 @@ mod tests {
 
     use super::format_analysis_report;
     use crate::domain::types::{
-        AnalysisReport, Capacity, DetectabilityRisk, SpectralScore, StegoTechnique as ST,
+        AiWatermarkAssessment, AnalysisReport, Capacity, DetectabilityRisk, SpectralScore,
+        StegoTechnique as ST,
     };
 
     fn base_report() -> AnalysisReport {
@@ -1616,6 +1639,7 @@ mod tests {
             chi_square_score: std::f64::consts::PI,
             detectability_risk: DetectabilityRisk::Low,
             recommended_max_payload_bytes: 512,
+            ai_watermark: None,
             spectral_score: None,
         }
     }
@@ -1672,5 +1696,24 @@ mod tests {
         assert!(out.contains("Technique"));
         assert!(out.contains("Chi-square"));
         assert!(out.contains("Recommended"));
+    }
+
+    #[test]
+    fn format_report_includes_ai_watermark_section_when_present() {
+        let mut report = base_report();
+        report.ai_watermark = Some(AiWatermarkAssessment {
+            detected: true,
+            model_id: Some("gemini".to_string()),
+            confidence: 0.875,
+            matched_strong_bins: 7,
+            total_strong_bins: 8,
+        });
+
+        let out = format_analysis_report(&report);
+        assert!(out.contains("AI Watermark Detection"));
+        assert!(out.contains("yes"));
+        assert!(out.contains("gemini"));
+        assert!(out.contains("0.8750"));
+        assert!(out.contains("7/8"));
     }
 }

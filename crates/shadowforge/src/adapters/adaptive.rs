@@ -17,7 +17,10 @@ use crate::domain::ports::{
     AdaptiveOptimiser, AiGenProfile, CameraProfile, CompressionSimulator, CoverProfile,
     CoverProfileMatcher,
 };
-use crate::domain::types::{Capacity, CoverMedia, CoverMediaKind, PlatformProfile, StegoTechnique};
+use crate::domain::types::{
+    AiWatermarkAssessment, Capacity, CoverMedia, CoverMediaKind, PlatformProfile,
+    StegoTechnique,
+};
 
 // ─── Built-in AI codebook ────────────────────────────────────────────────────
 
@@ -36,6 +39,12 @@ struct ProfileCodebook {
 pub struct CoverProfileMatcherImpl {
     ai_profiles: Vec<AiGenProfile>,
     camera_profiles: Vec<CameraProfile>,
+}
+
+struct AiProfileMatch<'a> {
+    profile: &'a AiGenProfile,
+    matched_strong_bins: usize,
+    total_strong_bins: usize,
 }
 
 impl CoverProfileMatcherImpl {
@@ -81,11 +90,22 @@ impl CoverProfileMatcherImpl {
             camera_profiles: Vec::new(),
         }
     }
-}
 
-impl CoverProfileMatcher for CoverProfileMatcherImpl {
-    fn profile_for(&self, cover: &CoverMedia) -> Option<CoverProfile> {
-        // Only images can be matched.
+    const fn ai_detection_supported(kind: CoverMediaKind) -> bool {
+        matches!(
+            kind,
+            CoverMediaKind::PngImage
+                | CoverMediaKind::BmpImage
+                | CoverMediaKind::JpegImage
+                | CoverMediaKind::GifImage
+        )
+    }
+
+    fn detection_threshold(total_strong_bins: usize) -> usize {
+        total_strong_bins.saturating_sub(1).max(1)
+    }
+
+    fn best_ai_profile_match(&self, cover: &CoverMedia) -> Option<AiProfileMatch<'_>> {
         let width = cover
             .metadata
             .get("width")
@@ -109,41 +129,77 @@ impl CoverProfileMatcher for CoverProfileMatcherImpl {
         let fft_len = pixels.len().next_power_of_two();
         let freq = fft_1d(&pixels, fft_len);
 
-        // Try each AI profile — pick the one with the most coherent carriers.
-        let best_ai = self.ai_profiles.iter().max_by_key(|p| {
-            let bins = p.carrier_bins_for(width, height).map_or(&[][..], |v| v);
-            bins.iter()
-                .filter(|b| b.is_strong())
-                .filter(|b| {
-                    let idx = b.freq.0 as usize * width as usize + b.freq.1 as usize;
-                    // Phase within π/8 of expected.
-                    freq.get(idx).is_some_and(|c| {
-                        let phase_diff = (f64::from(c.arg()) - b.phase).abs();
-                        phase_diff < std::f64::consts::PI / 8.0
-                    })
-                })
-                .count()
-        });
+        self.ai_profiles
+            .iter()
+            .filter_map(|profile| {
+                let bins = profile.carrier_bins_for(width, height)?;
+                let total_strong_bins = bins.iter().filter(|b| b.is_strong()).count();
+                if total_strong_bins == 0 {
+                    return None;
+                }
 
-        if let Some(profile) = best_ai {
-            let bins = profile
-                .carrier_bins_for(width, height)
-                .map_or(&[][..], |v| v);
-            let matching: usize = bins
-                .iter()
-                .filter(|b| b.is_strong())
-                .filter(|b| {
-                    let idx = b.freq.0 as usize * width as usize + b.freq.1 as usize;
-                    freq.get(idx).is_some_and(|c| {
-                        (f64::from(c.arg()) - b.phase).abs() < std::f64::consts::PI / 8.0
+                let matched_strong_bins = bins
+                    .iter()
+                    .filter(|b| b.is_strong())
+                    .filter(|b| {
+                        let idx = b.freq.0 as usize * width as usize + b.freq.1 as usize;
+                        freq.get(idx).is_some_and(|carrier| {
+                            (f64::from(carrier.arg()) - b.phase).abs() < std::f64::consts::PI / 8.0
+                        })
                     })
+                    .count();
+
+                Some(AiProfileMatch {
+                    profile,
+                    matched_strong_bins,
+                    total_strong_bins,
                 })
-                .count();
-            // Require at least half the strong bins to match.
-            let strong_total = bins.iter().filter(|b| b.is_strong()).count();
-            if matching >= strong_total.saturating_sub(1).max(1) {
-                return Some(CoverProfile::AiGenerator(profile.clone()));
-            }
+            })
+            .max_by_key(|candidate| candidate.matched_strong_bins)
+    }
+
+    /// Assess whether a raster cover still matches a known AI watermark profile.
+    #[must_use]
+    pub fn assess_ai_watermark(&self, cover: &CoverMedia) -> Option<AiWatermarkAssessment> {
+        if !Self::ai_detection_supported(cover.kind) {
+            return None;
+        }
+
+        let Some(best_match) = self.best_ai_profile_match(cover) else {
+            return Some(AiWatermarkAssessment {
+                detected: false,
+                model_id: None,
+                confidence: 0.0,
+                matched_strong_bins: 0,
+                total_strong_bins: 0,
+            });
+        };
+
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "small testable bin counts converted for a user-facing ratio"
+        )]
+        let confidence = best_match.matched_strong_bins as f64 / best_match.total_strong_bins as f64;
+        let detected = best_match.matched_strong_bins
+            >= Self::detection_threshold(best_match.total_strong_bins);
+
+        Some(AiWatermarkAssessment {
+            detected,
+            model_id: detected.then(|| best_match.profile.model_id.clone()),
+            confidence,
+            matched_strong_bins: best_match.matched_strong_bins,
+            total_strong_bins: best_match.total_strong_bins,
+        })
+    }
+}
+
+impl CoverProfileMatcher for CoverProfileMatcherImpl {
+    fn profile_for(&self, cover: &CoverMedia) -> Option<CoverProfile> {
+        if let Some(best_match) = self.best_ai_profile_match(cover)
+            && best_match.matched_strong_bins
+                >= Self::detection_threshold(best_match.total_strong_bins)
+        {
+            return Some(CoverProfile::AiGenerator(best_match.profile.clone()));
         }
 
         // Fallback: camera profile if any are loaded.
@@ -488,6 +544,25 @@ mod tests {
             metadata: HashMap::new(), // no width/height
         };
         assert!(matcher.profile_for(&cover).is_none());
+    }
+
+    #[test]
+    fn assess_ai_watermark_detects_matching_profile() {
+        let matcher = CoverProfileMatcherImpl::from_codebook(
+            r#"{"profiles":[{"model_id":"test-ai","channel_weights":[1.0,1.0,1.0],"carrier_map":{"8x8":[{"freq":[0,0],"phase":0.0,"coherence":1.0}]}}]}"#,
+        )
+        .unwrap_or_else(|_| panic!("valid JSON codebook should parse"));
+        let cover = make_cover(CoverMediaKind::PngImage, 8, 8);
+
+        let assessment = matcher.assess_ai_watermark(&cover);
+        assert!(assessment.is_some());
+        let Some(assessment) = assessment else {
+            return;
+        };
+        assert!(assessment.detected);
+        assert_eq!(assessment.model_id.as_deref(), Some("test-ai"));
+        assert_eq!(assessment.matched_strong_bins, 1);
+        assert_eq!(assessment.total_strong_bins, 1);
     }
 
     #[test]
