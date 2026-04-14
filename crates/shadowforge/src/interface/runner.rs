@@ -521,8 +521,7 @@ pub(crate) fn format_analysis_report(report: &crate::domain::types::AnalysisRepo
             let _ = writeln!(
                 out,
                 "  Matched strong bins:  {}/{}",
-                ai.matched_strong_bins,
-                ai.total_strong_bins
+                ai.matched_strong_bins, ai.total_strong_bins
             );
         } else {
             let _ = writeln!(out, "  Status:               no known profile match");
