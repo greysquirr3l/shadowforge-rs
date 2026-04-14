@@ -841,6 +841,7 @@ mod tests {
             chi_square_score: -13.5,
             detectability_risk: DetectabilityRisk::Low,
             recommended_max_payload_bytes: 50,
+            ai_watermark: None,
             spectral_score: None,
         };
         assert!(report.spectral_score.is_none());
