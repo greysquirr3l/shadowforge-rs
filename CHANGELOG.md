@@ -88,7 +88,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Testing
 
-- **Test coverage raised to 85%** (2039/2397 lines) — 380 tests, 0 failures
+- **Test coverage maintained at 85%** — 380 tests in this phase (now 453 total with T36–T40 AI watermark phase)
 - Added 128 new unit tests across all adapter and domain modules:
   application/services (34 tests, 100%), domain/analysis (98.6%),
   domain/crypto (93.5%), domain/distribution (89.2%), domain/types (100%),
