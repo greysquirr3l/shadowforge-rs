@@ -7,7 +7,7 @@ All bounded contexts live under `crates/shadowforge/src/domain/`. Each context o
 | Context | Module | Responsibility |
 |---------|--------|----------------|
 | **Crypto** | `crypto/` | ML-KEM-1024 encapsulation, ML-DSA-87 signing, AES-256-GCM encryption, Argon2id key derivation |
-| **Correction** | `correction/` | Reed-Solomon erasure coding, K-of-N shard splitting and recovery |
+| **Correction** | `correction/` | Reed-Solomon error correction, K-of-N shard splitting and recovery |
 | **Stego** | `stego/` | 10 steganographic techniques: LSB (image), DCT (JPEG), palette, phase/echo/spread (audio), zero-width text, PDF content-stream LSB, PDF metadata, corpus selection |
 | **Media** | `media/` | Image and audio format helpers (PNG, BMP, JPEG, GIF, WAV) |
 | **PDF** | `pdf/` | PDF domain logic: embed/extract, page-render pipeline, content-stream LSB, metadata watermarking |
@@ -33,8 +33,8 @@ All bounded contexts live under `crates/shadowforge/src/domain/`. Each context o
 
 Contexts do not import each other directly. Communication flows through:
 
-1. **Shared types** in `domain/types.rs` — `StegoPayload`, `Shard`, `CoverMedium`, `EncryptedPayload`, etc.
-2. **Port traits** in `domain/ports.rs` — `Encryptor`, `Signer`, `SymmetricCipher`, `ErasureCoder`, `MediaLoader`, etc.
+1. **Shared types** in `domain/types.rs` — `Payload`, `Shard`, `CoverMedia`, `EncryptedPayload`, etc.
+2. **Port traits** in `domain/ports.rs` — `Encryptor`, `Signer`, `SymmetricCipher`, `ErrorCorrector`, `MediaLoader`, etc.
 3. **Application services** in `application/` — orchestrate multiple contexts by accepting port trait references.
 
 This keeps each context independently testable and replaceable.

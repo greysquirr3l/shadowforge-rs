@@ -8,7 +8,7 @@
 [![Edition](https://img.shields.io/badge/Edition-2024-blue)](https://doc.rust-lang.org/edition-guide/rust-2024/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/Build-Passing-brightgreen)](https://github.com/greysquirr3l/shadowforge-rs/actions)
-[![Tests](https://img.shields.io/badge/Tests-387_passing-brightgreen)](https://github.com/greysquirr3l/shadowforge-rs/actions)
+[![Tests](https://img.shields.io/badge/Tests-453_passing-brightgreen)](https://github.com/greysquirr3l/shadowforge-rs/actions)
 [![Coverage](https://img.shields.io/badge/Coverage-85%25-brightgreen)](coverage/tarpaulin-report.html)
 [![Security](https://img.shields.io/badge/Status-Pre--Audit-yellow)](SECURITY.md)
 
@@ -241,8 +241,8 @@ make doc        # build rustdoc API docs
 
 ### Test Coverage
 
-380 tests across all adapter, domain, and application modules — **85% line
-coverage** (2039/2397 lines). Key module coverage:
+453 tests across all adapter, domain, and application modules — **85% line
+coverage**. Key module coverage:
 
 | Module | Coverage |
 |--------|----------|
