@@ -12,34 +12,43 @@ pub struct DistributorImpl {
     hmac_key: Vec<u8>,
     /// Optional explicit shard topology from CLI.
     shard_config: Option<(u8, u8)>,
+    /// Error corrector for K-of-N encoding.
+    corrector: Box<dyn ErrorCorrector>,
 }
 
 impl Default for DistributorImpl {
     fn default() -> Self {
-        Self::new(Self::generate_hmac_key())
+        let hmac_key = Self::generate_hmac_key();
+        Self::new(
+            hmac_key.clone(),
+            Box::new(crate::adapters::correction::RsErrorCorrector::new(hmac_key)),
+        )
     }
 }
 
 impl DistributorImpl {
-    /// Create a new distributor with the given HMAC key.
+    /// Create a new distributor with the given HMAC key and error corrector.
     #[must_use]
-    pub const fn new(hmac_key: Vec<u8>) -> Self {
+    pub fn new(hmac_key: Vec<u8>, corrector: Box<dyn ErrorCorrector>) -> Self {
         Self {
             hmac_key,
             shard_config: None,
+            corrector,
         }
     }
 
     /// Create a new distributor with explicit data/parity shard counts.
     #[must_use]
-    pub const fn new_with_shard_config(
+    pub fn new_with_shard_config(
         hmac_key: Vec<u8>,
         data_shards: u8,
         parity_shards: u8,
+        corrector: Box<dyn ErrorCorrector>,
     ) -> Self {
         Self {
             hmac_key,
             shard_config: Some((data_shards, parity_shards)),
+            corrector,
         }
     }
 
@@ -81,7 +90,7 @@ impl Distributor for DistributorImpl {
                 embedder,
                 data_shards,
                 parity_shards,
-                &self.hmac_key,
+                self.corrector.as_ref(),
             ),
             DistributionPattern::ManyToOne => {
                 // For ManyToOne called via the trait with a single payload,
@@ -169,9 +178,8 @@ fn distribute_one_to_many(
     embedder: &dyn EmbedTechnique,
     data_shards: u8,
     parity_shards: u8,
-    hmac_key: &[u8],
+    corrector: &dyn ErrorCorrector,
 ) -> Result<Vec<CoverMedia>, DistributionError> {
-    let corrector = crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec());
     let shards = corrector
         .encode(payload.as_bytes(), data_shards, parity_shards)
         .map_err(|source| DistributionError::CorrectionFailed { source })?;
@@ -286,7 +294,10 @@ mod tests {
 
     #[test]
     fn one_to_one_round_trip() -> TestResult {
-        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec());
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(b"test-hmac-key".to_vec()),
+        );
+        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec(), corrector);
         let payload = Payload::from_bytes(b"secret message".to_vec());
         let covers = vec![make_cover(128)];
         let result =
@@ -312,8 +323,11 @@ mod tests {
         };
         validate_cover_count(&pattern, covers.len())?;
 
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(b"test-hmac-key".to_vec()),
+        );
         let result =
-            distribute_one_to_many(&payload, covers, &MockEmbedder, 5, 3, b"test-hmac-key")?;
+            distribute_one_to_many(&payload, covers, &MockEmbedder, 5, 3, corrector.as_ref())?;
         assert_eq!(result.len(), 8);
         // Each cover should have been modified (data extended)
         for cover in &result {
@@ -324,7 +338,10 @@ mod tests {
 
     #[test]
     fn many_to_one_embed_single_cover() -> TestResult {
-        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec());
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(b"test-hmac-key".to_vec()),
+        );
+        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec(), corrector);
         let payload = Payload::from_bytes(b"combined payload".to_vec());
         let covers = vec![make_cover(512)];
         let result =
@@ -355,7 +372,10 @@ mod tests {
 
     #[test]
     fn insufficient_covers_returns_error() {
-        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec());
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(b"test-hmac-key".to_vec()),
+        );
+        let distributor = DistributorImpl::new(b"test-hmac-key".to_vec(), corrector);
         let payload = Payload::from_bytes(b"test".to_vec());
         let covers: Vec<CoverMedia> = vec![];
         let result =
@@ -435,8 +455,11 @@ mod tests {
     fn distribute_one_to_many_embed_failure() {
         let covers: Vec<CoverMedia> = (0..4).map(|_| make_cover(256)).collect();
         let payload = Payload::from_bytes(vec![0xBB; 32]);
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(b"test-hmac-key".to_vec()),
+        );
         let result =
-            distribute_one_to_many(&payload, covers, &FailEmbedder, 3, 1, b"test-hmac-key");
+            distribute_one_to_many(&payload, covers, &FailEmbedder, 3, 1, corrector.as_ref());
         assert!(result.is_err());
     }
 

@@ -409,10 +409,14 @@ fn distribute_covers(
     } else {
         None
     };
+    let corrector_for_dist: Box<dyn crate::domain::ports::ErrorCorrector> = Box::new(
+        crate::adapters::correction::RsErrorCorrector::new(hmac_key.clone()),
+    );
     let distributor = crate::adapters::distribution::DistributorImpl::new_with_shard_config(
         hmac_key,
         args.data_shards,
         args.parity_shards,
+        corrector_for_dist,
     );
     let (matcher, optimiser, compressor) = crate::adapters::adaptive::build_adaptive_profile_deps();
 
@@ -473,11 +477,14 @@ fn cmd_extract_distributed(args: &cli::ExtractDistributedArgs) -> Result<(), App
         let default_path = args.input_archive.with_extension("hmac");
         fs_read(&default_path)?
     };
+    let corrector_for_recon: Box<dyn crate::domain::ports::ErrorCorrector> = Box::new(
+        crate::adapters::correction::RsErrorCorrector::new(hmac_key.clone()),
+    );
     let reconstructor = crate::adapters::reconstruction::ReconstructorImpl::new(
         args.data_shards,
         args.parity_shards,
-        hmac_key,
         0,
+        corrector_for_recon,
     );
     let payload = crate::application::services::ReconstructService::reconstruct(
         covers,
