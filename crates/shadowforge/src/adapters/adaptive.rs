@@ -114,6 +114,10 @@ impl CoverProfileMatcherImpl {
         clippy::similar_names,
         reason = "R/G/B channel triples are intentionally symmetric; names like fft_r_half/fft_b_half reflect the domain"
     )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "multi-channel pyramid build + multi-scale phase loop; splitting would obscure the data flow more than it helps"
+    )]
     fn best_ai_profile_match(&self, cover: &CoverMedia) -> Option<AiProfileMatch<'_>> {
         let width = cover
             .metadata
@@ -150,7 +154,10 @@ impl CoverProfileMatcherImpl {
         let pixels_r_qtr = downsample_2x(&pixels_r_half, hw, hh);
         let pixels_b_qtr = downsample_2x(&pixels_b_half, hw, hh);
 
-        let fft_g_nat = fft_1d(&pixels_g_nat, pixels_g_nat.len().next_power_of_two());
+        let fft_g_nat = fft_1d(
+            &pixels_g_nat,
+            pixels_g_nat.len().next_power_of_two().min(MAX_FFT_LEN),
+        );
         let fft_r_nat = compute_fft_or_empty(&pixels_r_nat);
         let fft_b_nat = compute_fft_or_empty(&pixels_b_nat);
         let fft_g_half = compute_fft_or_empty(&pixels_g_half);
@@ -196,7 +203,13 @@ impl CoverProfileMatcherImpl {
                 .flatten()
                 .map(|(fg, fr, fb, sw, shift, penalty)| {
                     let detail = phase_match_detail_at_scale(
-                        fg, fr, fb, sw, bins, shift, profile.channel_weights,
+                        fg,
+                        fr,
+                        fb,
+                        sw,
+                        bins,
+                        shift,
+                        profile.channel_weights,
                     );
                     (detail, penalty)
                 })
@@ -211,7 +224,25 @@ impl CoverProfileMatcherImpl {
                     cross_validation_score: best_detail.cross_validation,
                 })
             })
-            .max_by_key(|candidate| candidate.matched_strong_bins)
+            .max_by(|left, right| {
+                // Prefer candidates that clear the detection threshold first,
+                // then rank by match ratio (cross-multiply to stay in integers),
+                // then by raw matched count as a final tiebreaker.
+                let left_detected =
+                    left.matched_strong_bins >= Self::detection_threshold(left.total_strong_bins);
+                let right_detected =
+                    right.matched_strong_bins >= Self::detection_threshold(right.total_strong_bins);
+                left_detected
+                    .cmp(&right_detected)
+                    .then_with(|| {
+                        let lscore =
+                            (left.matched_strong_bins as u128) * (right.total_strong_bins as u128);
+                        let rscore =
+                            (right.matched_strong_bins as u128) * (left.total_strong_bins as u128);
+                        lscore.cmp(&rscore)
+                    })
+                    .then_with(|| left.matched_strong_bins.cmp(&right.matched_strong_bins))
+            })
     }
 
     /// Assess whether a raster cover still matches a known AI watermark profile.
@@ -535,11 +566,20 @@ fn extract_channel_f32(data: &Bytes, width: u32, height: u32, channel: usize) ->
 
 /// Compute the 1-D FFT of `pixels`, zero-padded to the next power of two.
 /// Returns an empty `Vec` when `pixels` is empty.
+/// Normalise a raw phase difference into `[−π, π]`.
+///
+/// Handles the branch-cut discontinuity at `±π` so that phases near `π` and
+/// near `−π` compare correctly.
+#[inline]
+fn wrap_phase(raw: f64) -> f64 {
+    (raw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+}
+
 fn compute_fft_or_empty(pixels: &[f32]) -> Vec<Complex<f32>> {
     if pixels.is_empty() {
         Vec::new()
     } else {
-        fft_1d(pixels, pixels.len().next_power_of_two())
+        fft_1d(pixels, pixels.len().next_power_of_two().min(MAX_FFT_LEN))
     }
 }
 
@@ -561,6 +601,13 @@ fn parse_resolution_key(key: &str) -> Option<(u32, u32)> {
 /// Confidence multiplier applied when the exact resolution is absent from the
 /// codebook and the detector falls back to the nearest available resolution.
 const FALLBACK_CONFIDENCE_MULTIPLIER: f64 = 0.65;
+
+/// Maximum FFT length used for watermark detection.
+///
+/// Caps the 1-D FFT at ~1 M samples to bound CPU/memory cost for large images.
+/// Phase-coherence is driven by the carrier-bin indices (typically ≪ 1 M), so
+/// truncating at this length does not affect detection quality in practice.
+const MAX_FFT_LEN: usize = 1 << 20;
 
 /// Return the bin slice from `profile` whose resolution is closest to
 /// `(width, height)` by pixel count and aspect ratio, together with
@@ -665,27 +712,27 @@ fn phase_match_detail_at_scale(
     for bin in bins.iter().filter(|b| b.is_strong()) {
         let row = bin.freq.0.saturating_div(divisor);
         let col = bin.freq.1.saturating_div(divisor);
-        let idx = (row as usize).saturating_mul(scaled_width as usize) + col as usize;
+        let idx = (row as usize)
+            .saturating_mul(scaled_width as usize)
+            .saturating_add(col as usize);
 
         let Some(carrier_g) = freq_g.get(idx) else {
             continue;
         };
-        let phase_diff = f64::from(carrier_g.arg()) - bin.phase;
+        let phase_diff = wrap_phase(f64::from(carrier_g.arg()) - bin.phase);
         if phase_diff.abs() >= std::f64::consts::PI / 8.0 {
             continue;
         }
         matched_strong += 1;
         phase_cos_sum += phase_diff.cos().abs();
-        if freq_r
-            .get(idx)
-            .is_some_and(|c| (f64::from(c.arg()) - bin.phase).abs() < std::f64::consts::PI / 8.0)
-        {
+        if freq_r.get(idx).is_some_and(|c| {
+            wrap_phase(f64::from(c.arg()) - bin.phase).abs() < std::f64::consts::PI / 8.0
+        }) {
             r_cross += 1;
         }
-        if freq_b
-            .get(idx)
-            .is_some_and(|c| (f64::from(c.arg()) - bin.phase).abs() < std::f64::consts::PI / 8.0)
-        {
+        if freq_b.get(idx).is_some_and(|c| {
+            wrap_phase(f64::from(c.arg()) - bin.phase).abs() < std::f64::consts::PI / 8.0
+        }) {
             b_cross += 1;
         }
     }

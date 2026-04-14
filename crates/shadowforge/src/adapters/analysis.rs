@@ -9,6 +9,10 @@ use crate::domain::ports::CapacityAnalyser;
 use crate::domain::types::{AnalysisReport, Capacity, CoverMedia, StegoTechnique};
 
 /// Concrete [`CapacityAnalyser`] implementation.
+///
+/// This type is `#[non_exhaustive]`; always construct it via [`Self::new`] or
+/// [`Self::from_codebook`] rather than struct-literal syntax.
+#[non_exhaustive]
 pub struct CapacityAnalyserImpl {
     matcher: crate::adapters::adaptive::CoverProfileMatcherImpl,
 }
