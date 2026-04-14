@@ -86,7 +86,8 @@ impl Reconstructor for ReconstructorImpl {
         validate_shard_count(present, usize::from(self.data_shards))?;
 
         // Step 4: RS-decode via the ErrorCorrector port.
-        let recovered = self.corrector
+        let recovered = self
+            .corrector
             .decode(&slots, self.data_shards, self.parity_shards)
             .map_err(|source| ReconstructionError::CorrectionFailed { source })?;
 
@@ -213,7 +214,7 @@ mod tests {
         assert_eq!(covers.len(), 5);
 
         let corrector: Box<dyn ErrorCorrector> = Box::new(
-            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec()),
         );
         let reconstructor = ReconstructorImpl::new(3, 2, original.len(), corrector);
         let extractor = MockExtractor {
@@ -241,7 +242,7 @@ mod tests {
         covers.remove(3);
 
         let corrector: Box<dyn ErrorCorrector> = Box::new(
-            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec()),
         );
         let reconstructor = ReconstructorImpl::new(3, 2, original.len(), corrector);
         let extractor = MockExtractor {
@@ -265,7 +266,7 @@ mod tests {
         covers.remove(2);
 
         let corrector: Box<dyn ErrorCorrector> = Box::new(
-            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec()),
         );
         let reconstructor = ReconstructorImpl::new(3, 2, original.len(), corrector);
         let extractor = MockExtractor {
@@ -285,7 +286,7 @@ mod tests {
         let total_covers = covers.len();
 
         let corrector: Box<dyn ErrorCorrector> = Box::new(
-            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec()),
         );
         let reconstructor = ReconstructorImpl::new(2, 1, original.len(), corrector);
         let extractor = MockExtractor {

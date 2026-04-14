@@ -477,9 +477,8 @@ fn cmd_extract_distributed(args: &cli::ExtractDistributedArgs) -> Result<(), App
         let default_path = args.input_archive.with_extension("hmac");
         fs_read(&default_path)?
     };
-    let corrector_for_recon: Box<dyn crate::domain::ports::ErrorCorrector> = Box::new(
-        crate::adapters::correction::RsErrorCorrector::new(hmac_key.clone()),
-    );
+    let corrector_for_recon: Box<dyn crate::domain::ports::ErrorCorrector> =
+        Box::new(crate::adapters::correction::RsErrorCorrector::new(hmac_key));
     let reconstructor = crate::adapters::reconstruction::ReconstructorImpl::new(
         args.data_shards,
         args.parity_shards,
