@@ -20,26 +20,26 @@ pub struct ReconstructorImpl {
     data_shards: u8,
     /// Number of parity shards (M).
     parity_shards: u8,
-    /// HMAC key for shard verification.
-    hmac_key: Vec<u8>,
     /// Original payload length for RS trim.
     original_len: usize,
+    /// Error corrector for K-of-N decoding.
+    corrector: Box<dyn ErrorCorrector>,
 }
 
 impl ReconstructorImpl {
-    /// Create a new reconstructor with the given shard parameters.
+    /// Create a new reconstructor with the given shard parameters and error corrector.
     #[must_use]
-    pub const fn new(
+    pub fn new(
         data_shards: u8,
         parity_shards: u8,
-        hmac_key: Vec<u8>,
         original_len: usize,
+        corrector: Box<dyn ErrorCorrector>,
     ) -> Self {
         Self {
             data_shards,
             parity_shards,
-            hmac_key,
             original_len,
+            corrector,
         }
     }
 }
@@ -86,8 +86,7 @@ impl Reconstructor for ReconstructorImpl {
         validate_shard_count(present, usize::from(self.data_shards))?;
 
         // Step 4: RS-decode via the ErrorCorrector port.
-        let corrector = crate::adapters::correction::RsErrorCorrector::new(self.hmac_key.clone());
-        let recovered = corrector
+        let recovered = self.corrector
             .decode(&slots, self.data_shards, self.parity_shards)
             .map_err(|source| ReconstructionError::CorrectionFailed { source })?;
 
@@ -213,7 +212,10 @@ mod tests {
         let covers = distribute_and_get_covers(original, 3, 2, hmac_key, 128)?;
         assert_eq!(covers.len(), 5);
 
-        let reconstructor = ReconstructorImpl::new(3, 2, hmac_key.to_vec(), original.len());
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+        );
+        let reconstructor = ReconstructorImpl::new(3, 2, original.len(), corrector);
         let extractor = MockExtractor {
             cover_prefix_len: 128,
         };
@@ -238,7 +240,10 @@ mod tests {
         covers.remove(4);
         covers.remove(3);
 
-        let reconstructor = ReconstructorImpl::new(3, 2, hmac_key.to_vec(), original.len());
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+        );
+        let reconstructor = ReconstructorImpl::new(3, 2, original.len(), corrector);
         let extractor = MockExtractor {
             cover_prefix_len: 128,
         };
@@ -259,7 +264,10 @@ mod tests {
         covers.remove(3);
         covers.remove(2);
 
-        let reconstructor = ReconstructorImpl::new(3, 2, hmac_key.to_vec(), original.len());
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+        );
+        let reconstructor = ReconstructorImpl::new(3, 2, original.len(), corrector);
         let extractor = MockExtractor {
             cover_prefix_len: 128,
         };
@@ -276,7 +284,10 @@ mod tests {
         let covers = distribute_and_get_covers(original, 2, 1, hmac_key, 64)?;
         let total_covers = covers.len();
 
-        let reconstructor = ReconstructorImpl::new(2, 1, hmac_key.to_vec(), original.len());
+        let corrector: Box<dyn ErrorCorrector> = Box::new(
+            crate::adapters::correction::RsErrorCorrector::new(hmac_key.to_vec())
+        );
+        let reconstructor = ReconstructorImpl::new(2, 1, original.len(), corrector);
         let extractor = MockExtractor {
             cover_prefix_len: 64,
         };
