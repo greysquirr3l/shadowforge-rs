@@ -17,6 +17,112 @@
           { "freq": [384, 1408], "phase": 0.0, "coherence": 0.9586 }
         ]
       }
+    },
+    {
+      "model_id": "midjourney",
+      "channel_weights": [0.9, 1.0, 0.85],
+      "carrier_map": {
+        "1024x1024": [
+          { "freq": [12, 8], "phase": 0.785, "coherence": 0.9821 },
+          { "freq": [8, 12], "phase": 0.785, "coherence": 0.9734 },
+          { "freq": [18, 6], "phase": 0.0, "coherence": 0.9612 },
+          { "freq": [6, 18], "phase": 0.0, "coherence": 0.9512 },
+          { "freq": [22, 22], "phase": 1.571, "coherence": 0.9188 }
+        ],
+        "1408x1408": [
+          { "freq": [16, 11], "phase": 0.785, "coherence": 0.9756 },
+          { "freq": [11, 16], "phase": 0.785, "coherence": 0.9688 },
+          { "freq": [24, 8], "phase": 0.0, "coherence": 0.9544 },
+          { "freq": [8, 24], "phase": 0.0, "coherence": 0.9445 }
+        ],
+        "1024x1792": [
+          { "freq": [12, 8], "phase": 0.785, "coherence": 0.9644 },
+          { "freq": [8, 14], "phase": 0.785, "coherence": 0.9534 },
+          { "freq": [18, 6], "phase": 0.0, "coherence": 0.9422 }
+        ]
+      }
+    },
+    {
+      "model_id": "stable-diffusion-xl",
+      "channel_weights": [0.8, 0.9, 1.0],
+      "carrier_map": {
+        "1024x1024": [
+          { "freq": [7, 11], "phase": 1.571, "coherence": 0.9744 },
+          { "freq": [11, 7], "phase": 1.571, "coherence": 0.9688 },
+          { "freq": [15, 15], "phase": 0.0, "coherence": 0.9601 },
+          { "freq": [21, 9], "phase": 3.142, "coherence": 0.9488 }
+        ],
+        "512x512": [
+          { "freq": [4, 6], "phase": 1.571, "coherence": 0.9812 },
+          { "freq": [6, 4], "phase": 1.571, "coherence": 0.9755 },
+          { "freq": [8, 8], "phase": 0.0, "coherence": 0.9644 },
+          { "freq": [11, 5], "phase": 3.142, "coherence": 0.9422 }
+        ],
+        "768x768": [
+          { "freq": [6, 9], "phase": 1.571, "coherence": 0.9701 },
+          { "freq": [9, 6], "phase": 1.571, "coherence": 0.9644 },
+          { "freq": [12, 12], "phase": 0.0, "coherence": 0.9533 }
+        ]
+      }
+    },
+    {
+      "model_id": "dall-e-3",
+      "channel_weights": [0.95, 1.0, 0.9],
+      "carrier_map": {
+        "1024x1024": [
+          { "freq": [19, 19], "phase": 0.0, "coherence": 0.9912 },
+          { "freq": [15, 23], "phase": 2.356, "coherence": 0.9844 },
+          { "freq": [23, 15], "phase": 2.356, "coherence": 0.9811 },
+          { "freq": [27, 11], "phase": 0.785, "coherence": 0.9699 },
+          { "freq": [11, 27], "phase": 0.785, "coherence": 0.9622 }
+        ],
+        "1792x1024": [
+          { "freq": [26, 19], "phase": 0.0, "coherence": 0.9867 },
+          { "freq": [21, 23], "phase": 2.356, "coherence": 0.9788 },
+          { "freq": [38, 15], "phase": 0.785, "coherence": 0.9655 }
+        ],
+        "1024x1792": [
+          { "freq": [19, 26], "phase": 0.0, "coherence": 0.9867 },
+          { "freq": [23, 21], "phase": 2.356, "coherence": 0.9788 },
+          { "freq": [15, 38], "phase": 0.785, "coherence": 0.9655 }
+        ]
+      }
+    },
+    {
+      "model_id": "adobe-firefly",
+      "channel_weights": [1.0, 0.95, 0.85],
+      "carrier_map": {
+        "2048x2048": [
+          { "freq": [17, 17], "phase": 0.0, "coherence": 0.9934 },
+          { "freq": [11, 23], "phase": 1.571, "coherence": 0.9867 },
+          { "freq": [23, 11], "phase": 1.571, "coherence": 0.9823 },
+          { "freq": [9, 9], "phase": 0.785, "coherence": 0.9744 },
+          { "freq": [29, 7], "phase": 3.142, "coherence": 0.9611 }
+        ],
+        "1024x1024": [
+          { "freq": [9, 9], "phase": 0.0, "coherence": 0.9878 },
+          { "freq": [6, 12], "phase": 1.571, "coherence": 0.9812 },
+          { "freq": [12, 6], "phase": 1.571, "coherence": 0.9766 },
+          { "freq": [15, 4], "phase": 3.142, "coherence": 0.9644 }
+        ]
+      }
+    },
+    {
+      "model_id": "flux",
+      "channel_weights": [0.88, 1.0, 0.92],
+      "carrier_map": {
+        "1024x1024": [
+          { "freq": [14, 6], "phase": 0.0, "coherence": 0.9755 },
+          { "freq": [6, 14], "phase": 0.0, "coherence": 0.9688 },
+          { "freq": [20, 10], "phase": 2.356, "coherence": 0.9577 },
+          { "freq": [10, 20], "phase": 2.356, "coherence": 0.9511 }
+        ],
+        "1280x1280": [
+          { "freq": [17, 7], "phase": 0.0, "coherence": 0.9722 },
+          { "freq": [7, 17], "phase": 0.0, "coherence": 0.9655 },
+          { "freq": [25, 13], "phase": 2.356, "coherence": 0.9533 }
+        ]
+      }
     }
   ]
 }

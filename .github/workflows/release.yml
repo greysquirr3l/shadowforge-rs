@@ -90,8 +90,15 @@ jobs:
       - name: Install pdfium
         shell: bash
         run: |
-          curl -L "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/${{ matrix.pdfium_asset }}" | tar xz || true
+          curl -L "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/${{ matrix.pdfium_asset }}" | tar xz
+          if [[ ! -d "$(pwd)/lib" ]]; then
+            echo "pdfium library directory was not extracted" >&2
+            exit 1
+          fi
           echo "PDFIUM_DYNAMIC_LIB_PATH=$(pwd)/lib" >> $GITHUB_ENV
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "$(pwd)/lib" >> $GITHUB_PATH
+          fi
 
       - name: Build (native)
         if: "!matrix.cross"
@@ -136,7 +143,8 @@ jobs:
         run: |
           BIN="target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}"
           VERSION="${GITHUB_REF_NAME:-dev}"
-          ARCHIVE="${{ env.BINARY_NAME }}_${VERSION}_${{ matrix.target }}.tar.gz"
+          SAFE_VERSION="${VERSION//\//-}"
+          ARCHIVE="${{ env.BINARY_NAME }}_${SAFE_VERSION}_${{ matrix.target }}.tar.gz"
           cp "$BIN" .
           tar czf "$ARCHIVE" "${{ env.BINARY_NAME }}" completions/ README.md LICENSE
           echo "ASSET=$ARCHIVE" >> $GITHUB_ENV
@@ -147,7 +155,8 @@ jobs:
         run: |
           $BIN = "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe"
           $VERSION = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
-          $ARCHIVE = "${{ env.BINARY_NAME }}_${VERSION}_${{ matrix.target }}.zip"
+          $SAFE_VERSION = $VERSION -replace '[\\/]', '-'
+          $ARCHIVE = "${{ env.BINARY_NAME }}_${SAFE_VERSION}_${{ matrix.target }}.zip"
           Copy-Item $BIN .
           Compress-Archive -Path "${{ env.BINARY_NAME }}.exe","completions","README.md","LICENSE" -DestinationPath $ARCHIVE
           echo "ASSET=$ARCHIVE" | Out-File -FilePath $env:GITHUB_ENV -Append

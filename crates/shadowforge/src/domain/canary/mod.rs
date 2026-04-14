@@ -16,6 +16,7 @@ use crate::domain::types::{CanaryShard, Shard};
 /// allowing the distribution owner to identify it without revealing this
 /// to partial shard holders. The HMAC tag is derived with the `canary_id`
 /// mixed into the key so it will fail normal HMAC verification.
+#[must_use]
 pub fn generate_canary_shard(
     canary_id: Uuid,
     shard_size: usize,
@@ -64,6 +65,7 @@ pub fn generate_canary_shard(
 /// the SHA-256 marker derived from the `canary_id`.
 ///
 /// This is a constant-time comparison to avoid timing side channels.
+#[must_use]
 pub fn is_canary_shard(shard: &Shard, canary_id: Uuid) -> bool {
     use subtle::ConstantTimeEq;
 

@@ -1,6 +1,7 @@
 //! PDF processing adapter using lopdf and pdfium-render.
 
 use std::collections::HashMap;
+use std::env;
 use std::io::BufWriter;
 use std::path::Path;
 
@@ -40,6 +41,41 @@ impl PdfProcessorImpl {
     #[must_use]
     pub const fn new(dpi: u16) -> Self {
         Self { dpi }
+    }
+
+    fn bind_pdfium() -> Result<Pdfium, PdfError> {
+        let mut bind_errors = Vec::new();
+
+        if let Some(pdfium_dir) = env::var_os("PDFIUM_DYNAMIC_LIB_PATH") {
+            let library_path = Pdfium::pdfium_platform_library_name_at_path(&pdfium_dir);
+            match Pdfium::bind_to_library(library_path) {
+                Ok(bindings) => return Ok(Pdfium::new(bindings)),
+                Err(error) => bind_errors.push(format!(
+                    "PDFIUM_DYNAMIC_LIB_PATH={}: {error}",
+                    Path::new(&pdfium_dir).display()
+                )),
+            }
+        }
+
+        let local_library = Pdfium::pdfium_platform_library_name_at_path("./");
+        match Pdfium::bind_to_library(local_library) {
+            Ok(bindings) => return Ok(Pdfium::new(bindings)),
+            Err(error) => bind_errors.push(format!("./: {error}")),
+        }
+
+        match Pdfium::bind_to_system_library() {
+            Ok(bindings) => Ok(Pdfium::new(bindings)),
+            Err(error) => {
+                bind_errors.push(format!("system library: {error}"));
+                Err(PdfError::RenderFailed {
+                    page: 0,
+                    reason: format!(
+                        "Failed to load pdfium library. Tried {}",
+                        bind_errors.join(", ")
+                    ),
+                })
+            }
+        }
     }
 }
 
@@ -84,15 +120,8 @@ impl PdfProcessor for PdfProcessorImpl {
     }
 
     fn render_pages_to_images(&self, pdf: &CoverMedia) -> Result<Vec<CoverMedia>, PdfError> {
-        // Initialize pdfium library
-        let pdfium = Pdfium::new(
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
-                .or_else(|_| Pdfium::bind_to_system_library())
-                .map_err(|e| PdfError::RenderFailed {
-                    page: 0,
-                    reason: format!("Failed to load pdfium library: {e}"),
-                })?,
-        );
+        // Initialize pdfium library using the CI-provided path when available.
+        let pdfium = Self::bind_pdfium()?;
 
         // Load PDF from bytes
         let document = pdfium

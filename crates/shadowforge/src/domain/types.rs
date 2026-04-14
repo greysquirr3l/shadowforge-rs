@@ -408,9 +408,26 @@ pub struct AnalysisReport {
     pub detectability_risk: DetectabilityRisk,
     /// Conservative payload size that stays below the detectability threshold.
     pub recommended_max_payload_bytes: u64,
+    /// Single-image AI watermark assessment for raster covers.
+    pub ai_watermark: Option<AiWatermarkAssessment>,
     /// Spectral-domain score, populated when `spectral_detectability_score`
     /// is called.  `None` when only the basic chi-square analysis was run.
     pub spectral_score: Option<SpectralScore>,
+}
+
+/// Single-image AI watermark assessment derived from known generator profiles.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiWatermarkAssessment {
+    /// Whether the cover matched a known AI watermark profile strongly enough.
+    pub detected: bool,
+    /// Model identifier for the detected watermark, when confidence clears the threshold.
+    pub model_id: Option<String>,
+    /// Ratio of matched strong carrier bins to total strong carrier bins.
+    pub confidence: f64,
+    /// Number of strong carrier bins that matched the observed image phases.
+    pub matched_strong_bins: usize,
+    /// Number of strong carrier bins available in the best matching profile.
+    pub total_strong_bins: usize,
 }
 
 // ─── WatermarkReceipt ─────────────────────────────────────────────────────────
@@ -804,6 +821,7 @@ mod tests {
             chi_square_score: 0.42,
             detectability_risk: DetectabilityRisk::Low,
             recommended_max_payload_bytes: 512,
+            ai_watermark: None,
             spectral_score: None,
         };
         let json = serde_json::to_string(&report)?;
