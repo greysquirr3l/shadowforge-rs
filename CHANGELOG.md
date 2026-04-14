@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-14
+
 ### Added
 
 - **ML-DSA sign/verify CLI workflows** — `keygen sign` and `keygen verify`
@@ -45,12 +47,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   distribution through the application service layer rather than calling the
   adapter port directly from the runner; eliminates an interface→adapter
   boundary violation
+- **Hexagonal architecture wiring audited** — verified all adapter instantiation
+  points in runner.rs, eliminated dead code (PDF stego duplicates), and enforced
+  strict dependency injection for ErrorCorrector across distribution and
+  reconstruction services
 
 ### Testing
 
 - **Spectral/adaptive phase validated** — T36–T40 implementation passed full
   workspace validation: 453 tests passing, 0 failures, and clippy clean with
   0 warnings
+- **Documentation audit complete** — verified all references to port traits,
+  test counts, and architecture documentation; updated README badge (387 → 453),
+  CHANGELOG test counts, and bounded contexts terminology
 
 ## [0.2.0] — 2026-04-10
 
