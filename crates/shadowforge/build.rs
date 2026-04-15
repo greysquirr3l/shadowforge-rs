@@ -20,15 +20,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Check if the pdfium shared library is findable; emit a warning only when it is not.
 fn check_pdfium_availability() {
-    // Re-run this check whenever the user changes the override variable.
+    // Re-run this check whenever the user changes the override variable or build target.
     println!("cargo:rerun-if-env-changed=PDFIUM_DYNAMIC_LIB_PATH");
+    println!("cargo:rerun-if-changed=unknown");
 
     let env_var = "PDFIUM_DYNAMIC_LIB_PATH";
     if let Ok(custom_path) = env::var(env_var) {
-        // User explicitly configured the path — only warn if it does not exist.
-        if !Path::new(&custom_path).exists() {
+        // User explicitly configured the path — validate it contains the pdfium library.
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        let lib_name: &str = if target_os == "macos" {
+            "libpdfium.dylib"
+        } else if target_os == "windows" {
+            "pdfium.dll"
+        } else {
+            "libpdfium.so"
+        };
+        let custom_path_obj = Path::new(&custom_path);
+        let lib_found = if custom_path_obj.is_dir() {
+            custom_path_obj.join(lib_name).exists()
+        } else {
+            custom_path_obj.exists()
+        };
+        if !lib_found {
             println!(
-                "cargo:warning=PDFIUM_DYNAMIC_LIB_PATH is set to '{custom_path}' but the path does not exist."
+                "cargo:warning=PDFIUM_DYNAMIC_LIB_PATH='{custom_path}' does not contain {lib_name}. PDF rasterisation will fail at runtime."
             );
         }
         return;
@@ -68,7 +83,7 @@ fn check_pdfium_availability() {
 
     // Not found in any standard location — emit setup instructions.
     println!(
-        "cargo:warning=pdfium library ({lib_name}) not found. PDF features will fail at runtime."
+        "cargo:warning=pdfium library ({lib_name}) not found. PDF rasterisation will be unavailable unless pdfium is discoverable via system library paths."
     );
     println!("cargo:warning=");
     println!("cargo:warning=To set up pdfium:");

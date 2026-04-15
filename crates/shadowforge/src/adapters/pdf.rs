@@ -73,14 +73,12 @@ impl PdfProcessorImpl {
             Err(error) => bind_errors.push(format!("./: {error}")),
         }
 
-        // 4. Fail with helpful error
-        Err(PdfError::RenderFailed {
-            page: 0,
+        // 4. Fail with helpful error — use PdfError::BindFailed so it's not confused with a page render failure
+        Err(PdfError::BindFailed {
             reason: format!(
-                "Failed to load pdfium library. Attempted: {}.\n\
-                 Download a prebuilt binary from https://github.com/bblanchon/pdfium-binaries/ \n\
-                 and set PDFIUM_DYNAMIC_LIB_PATH=/path/to/lib, \n\
-                 or disable the pdf feature with --no-default-features.",
+                "Failed to load pdfium library. Binding attempts: {}. \
+                 Download a prebuilt binary from https://github.com/bblanchon/pdfium-binaries/, \
+                 set PDFIUM_DYNAMIC_LIB_PATH, or disable the 'pdf' feature with --no-default-features --features corpus,adaptive.",
                 bind_errors.join("; ")
             ),
         })
@@ -634,7 +632,8 @@ fn map_pdf_error(error: PdfError) -> StegoError {
         PdfError::ParseFailed { reason }
         | PdfError::RebuildFailed { reason }
         | PdfError::EmbedFailed { reason }
-        | PdfError::IoError { reason } => StegoError::MalformedCoverData {
+        | PdfError::IoError { reason }
+        | PdfError::BindFailed { reason } => StegoError::MalformedCoverData {
             reason: format!("pdf processing failed: {reason}"),
         },
     }
