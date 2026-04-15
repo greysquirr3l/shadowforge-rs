@@ -8,6 +8,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-04-15
+
+### Fixed
+
+- **Redundant clone removed** — `runner.rs` `cmd_extract_distributed` was
+  cloning `hmac_key` into `RsErrorCorrector::new` unnecessarily; removed the
+  redundant `.clone()` (clippy `redundant_clone` lint)
+- **Formatting** — applied `cargo fmt` to `adapters/reconstruction.rs`
+
 ## [0.3.0] — 2026-04-14
 
 ### Added
