@@ -632,9 +632,11 @@ fn map_pdf_error(error: PdfError) -> StegoError {
         PdfError::ParseFailed { reason }
         | PdfError::RebuildFailed { reason }
         | PdfError::EmbedFailed { reason }
-        | PdfError::IoError { reason }
-        | PdfError::BindFailed { reason } => StegoError::MalformedCoverData {
+        | PdfError::IoError { reason } => StegoError::MalformedCoverData {
             reason: format!("pdf processing failed: {reason}"),
+        },
+        PdfError::BindFailed { reason } => StegoError::UnsupportedCoverType {
+            reason: format!("pdfium library is not available: {reason}"),
         },
     }
 }

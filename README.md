@@ -154,10 +154,10 @@ shadowforge = { version = "0.3", default-features = false }
 
 ```bash
 # Install with all features (default)
-cargo install shadowforge-rs
+cargo install shadowforge
 
 # Install without PDF support
-cargo install shadowforge-rs --no-default-features --features corpus,adaptive
+cargo install shadowforge --no-default-features --features corpus,adaptive
 
 # Install from source with specific features
 git clone https://github.com/greysquirr3l/shadowforge-rs

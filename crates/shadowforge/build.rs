@@ -22,11 +22,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn check_pdfium_availability() {
     // Re-run this check whenever the user changes the override variable or build target.
     println!("cargo:rerun-if-env-changed=PDFIUM_DYNAMIC_LIB_PATH");
-    println!("cargo:rerun-if-changed=unknown");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
 
     let env_var = "PDFIUM_DYNAMIC_LIB_PATH";
-    if let Ok(custom_path) = env::var(env_var) {
+    if let Some(custom_path_os) = env::var_os(env_var) {
         // User explicitly configured the path — validate it contains the pdfium library.
+        // Use var_os to accept any valid filesystem path, not just valid UTF-8.
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
         let lib_name: &str = if target_os == "macos" {
             "libpdfium.dylib"
@@ -35,15 +36,16 @@ fn check_pdfium_availability() {
         } else {
             "libpdfium.so"
         };
-        let custom_path_obj = Path::new(&custom_path);
+        let custom_path_obj = Path::new(&custom_path_os);
         let lib_found = if custom_path_obj.is_dir() {
             custom_path_obj.join(lib_name).exists()
         } else {
             custom_path_obj.exists()
         };
         if !lib_found {
+            let display = custom_path_os.to_string_lossy();
             println!(
-                "cargo:warning=PDFIUM_DYNAMIC_LIB_PATH='{custom_path}' does not contain {lib_name}. PDF rasterisation will fail at runtime."
+                "cargo:warning=PDFIUM_DYNAMIC_LIB_PATH='{display}' does not contain {lib_name}. PDF rasterisation will fail at runtime."
             );
         }
         return;
@@ -64,6 +66,13 @@ fn check_pdfium_availability() {
         &[
             "C:\\Program Files\\pdfium\\lib",
             "C:\\Program Files (x86)\\pdfium\\lib",
+        ]
+    } else if target_os == "macos" {
+        &[
+            "/opt/homebrew/lib",
+            "/opt/local/lib",
+            "/usr/local/lib",
+            "/usr/lib",
         ]
     } else {
         &[
@@ -100,5 +109,5 @@ fn check_pdfium_availability() {
         "cargo:warning=  Windows: Download from https://github.com/bblanchon/pdfium-binaries/"
     );
     println!("cargo:warning=");
-    println!("cargo:warning=Or disable PDF: cargo build --no-default-features");
+    println!("cargo:warning=Or disable only PDF: cargo build --no-default-features --features corpus,adaptive");
 }
