@@ -46,6 +46,7 @@ impl PdfProcessorImpl {
     fn bind_pdfium() -> Result<Pdfium, PdfError> {
         let mut bind_errors = Vec::new();
 
+        // 1. Try explicit env var override (highest priority)
         if let Some(pdfium_dir) = env::var_os("PDFIUM_DYNAMIC_LIB_PATH") {
             let library_path = Pdfium::pdfium_platform_library_name_at_path(&pdfium_dir);
             match Pdfium::bind_to_library(library_path) {
@@ -57,25 +58,30 @@ impl PdfProcessorImpl {
             }
         }
 
+        // 2. Try system library (searched via the OS dynamic linker)
+        match Pdfium::bind_to_system_library() {
+            Ok(bindings) => return Ok(Pdfium::new(bindings)),
+            Err(error) => {
+                bind_errors.push(format!("system library: {error}"));
+            }
+        }
+
+        // 3. Try local directory (e.g., ./)
         let local_library = Pdfium::pdfium_platform_library_name_at_path("./");
         match Pdfium::bind_to_library(local_library) {
             Ok(bindings) => return Ok(Pdfium::new(bindings)),
             Err(error) => bind_errors.push(format!("./: {error}")),
         }
 
-        match Pdfium::bind_to_system_library() {
-            Ok(bindings) => Ok(Pdfium::new(bindings)),
-            Err(error) => {
-                bind_errors.push(format!("system library: {error}"));
-                Err(PdfError::RenderFailed {
-                    page: 0,
-                    reason: format!(
-                        "Failed to load pdfium library. Tried {}",
-                        bind_errors.join(", ")
-                    ),
-                })
-            }
-        }
+        // 4. Fail with helpful error — use PdfError::BindFailed so it's not confused with a page render failure
+        Err(PdfError::BindFailed {
+            reason: format!(
+                "Failed to load pdfium library. Binding attempts: {}. \
+                 Download a prebuilt binary from https://github.com/bblanchon/pdfium-binaries/, \
+                 set PDFIUM_DYNAMIC_LIB_PATH, or disable the 'pdf' feature with --no-default-features --features corpus,adaptive.",
+                bind_errors.join("; ")
+            ),
+        })
     }
 }
 
@@ -628,6 +634,9 @@ fn map_pdf_error(error: PdfError) -> StegoError {
         | PdfError::EmbedFailed { reason }
         | PdfError::IoError { reason } => StegoError::MalformedCoverData {
             reason: format!("pdf processing failed: {reason}"),
+        },
+        PdfError::BindFailed { reason } => StegoError::UnsupportedCoverType {
+            reason: format!("pdfium library is not available: {reason}"),
         },
     }
 }
