@@ -12,10 +12,35 @@
 git clone https://github.com/greysquirr3l/shadowforge-rs.git
 cd shadowforge-rs
 
-# Build in release mode
+# Build in release mode (all default features enabled)
 cargo build --release
 
 # The binary is at target/release/shadowforge
+```
+
+## Cargo Features
+
+shadowforge-rs uses optional features to control which capabilities are compiled in. This allows you to reduce the attack surface and build dependencies by disabling features you don't need.
+
+### Available Features
+
+| Feature | Default | Purpose |
+|---------|---------|---------|
+| `pdf` | ✅ | PDF embedding/extraction and page rasterisation (requires pdfium) |
+| `corpus` | ✅ | Corpus-based steganography (zero-modification cover selection) |
+| `adaptive` | ✅ | Adaptive embedding (STC-inspired steganalysis evasion) |
+
+### Building with Specific Features
+
+```bash
+# Disable all optional features
+cargo build --release --no-default-features
+
+# Disable only PDF support
+cargo build --release --no-default-features --features corpus,adaptive
+
+# Disable only adaptive embedding
+cargo build --release --no-default-features --features pdf,corpus
 ```
 
 ## Verify Installation
@@ -27,6 +52,14 @@ shadowforge version
 ## PDF Support (Optional)
 
 PDF page rasterisation requires the pdfium shared library. Without it, PDF content-stream and metadata steganography still work, but the render-to-PNG pipeline is unavailable.
+
+The build process will auto-detect pdfium if:
+
+- Set via the `PDFIUM_DYNAMIC_LIB_PATH` environment variable
+- Installed in common system paths (`/opt/homebrew/lib`, `/usr/local/lib`, `/usr/lib`, etc.)
+- Already available on the system PATH
+
+If pdfium is not found, the build will emit a warning. If you're building without the `pdf` feature, this warning can be safely ignored.
 
 ### macOS (Apple Silicon)
 

@@ -46,6 +46,7 @@ impl PdfProcessorImpl {
     fn bind_pdfium() -> Result<Pdfium, PdfError> {
         let mut bind_errors = Vec::new();
 
+        // 1. Try explicit env var override (highest priority)
         if let Some(pdfium_dir) = env::var_os("PDFIUM_DYNAMIC_LIB_PATH") {
             let library_path = Pdfium::pdfium_platform_library_name_at_path(&pdfium_dir);
             match Pdfium::bind_to_library(library_path) {
@@ -57,25 +58,31 @@ impl PdfProcessorImpl {
             }
         }
 
+        // 2. Try auto-downloaded pdfium (built by cargo with pdfium_download feature)
+        match Pdfium::bind_to_system_library() {
+            Ok(bindings) => return Ok(Pdfium::new(bindings)),
+            Err(error) => {
+                bind_errors.push(format!("auto-downloaded pdfium: {error}"));
+            }
+        }
+
+        // 3. Try local directory (e.g., ./)
         let local_library = Pdfium::pdfium_platform_library_name_at_path("./");
         match Pdfium::bind_to_library(local_library) {
             Ok(bindings) => return Ok(Pdfium::new(bindings)),
             Err(error) => bind_errors.push(format!("./: {error}")),
         }
 
-        match Pdfium::bind_to_system_library() {
-            Ok(bindings) => Ok(Pdfium::new(bindings)),
-            Err(error) => {
-                bind_errors.push(format!("system library: {error}"));
-                Err(PdfError::RenderFailed {
-                    page: 0,
-                    reason: format!(
-                        "Failed to load pdfium library. Tried {}",
-                        bind_errors.join(", ")
-                    ),
-                })
-            }
-        }
+        // 4. Fail with helpful error
+        Err(PdfError::RenderFailed {
+            page: 0,
+            reason: format!(
+                "Failed to load pdfium library. Auto-download during build should have handled this.\n\
+                 If you have a custom pdfium build, set PDFIUM_DYNAMIC_LIB_PATH=/path/to/lib.\n\
+                 Paths tried: {}",
+                bind_errors.join(", ")
+            ),
+        })
     }
 }
 

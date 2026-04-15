@@ -101,6 +101,97 @@ export PDFIUM_DYNAMIC_LIB_PATH="$(pwd)/lib"
 To persist the environment variable, add the `export` line to your shell
 profile (`~/.bashrc`, `~/.zshrc`, etc.).
 
+---
+
+## Building with Features
+
+shadowforge-rs uses Cargo's optional feature system to control which capabilities are compiled in. This allows users to reduce the attack surface and dependencies by disabling features they don't need.
+
+### Available Features
+
+| Feature | Default | Purpose |
+|---------|---------|---------|
+| `pdf` | ✅ | PDF embedding/extraction and page rasterisation (requires pdfium) |
+| `corpus` | ✅ | Corpus-based steganography (zero-modification cover selection) |
+| `adaptive` | ✅ | Adaptive embedding (STC-inspired steganalysis evasion) |
+| `simd` | ❌ | SIMD acceleration for Reed-Solomon (if available on platform) |
+
+### Disabling Features
+
+By default, `pdf`, `corpus`, and `adaptive` are enabled. To build with fewer features:
+
+```bash
+# Disable all optional features
+cargo build --no-default-features
+
+# Disable only PDF
+cargo build --no-default-features --features corpus,adaptive
+
+# Enable only SIMD (for performance-critical deployments)
+cargo build --features simd
+```
+
+### Installing from crates.io
+
+When using shadowforge-rs as a dependency:
+
+```toml
+# In your Cargo.toml
+[dependencies]
+shadowforge = "0.3"  # All default features enabled
+
+# Or with specific features
+shadowforge = { version = "0.3", features = ["corpus"] }
+
+# Or with no features
+shadowforge = { version = "0.3", default-features = false }
+```
+
+### Installing the Binary with Features
+
+```bash
+# Install with all features (default)
+cargo install shadowforge-rs
+
+# Install without PDF support
+cargo install shadowforge-rs --no-default-features --features corpus,adaptive
+
+# Install from source with specific features
+git clone https://github.com/greysquirr3l/shadowforge-rs
+cd shadowforge-rs
+cargo install --path crates/shadowforge --features pdf,corpus,adaptive
+```
+
+### PDF Support (Optional)
+
+PDF page rasterisation requires the pdfium shared library. Without it,
+PDF content-stream and metadata steganography still work, but the
+render-to-PNG pipeline is unavailable.
+
+The build process will auto-detect pdfium if:
+
+- Set via `PDFIUM_DYNAMIC_LIB_PATH` environment variable
+- Installed in common system paths (`/opt/homebrew/lib`, `/usr/lib`, etc.)
+- Already downloaded and available on the system PATH
+
+If pdfium is not found, the build will emit a warning with setup instructions.
+
+To manually set up pdfium:
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz | tar xz
+export PDFIUM_DYNAMIC_LIB_PATH="$(pwd)/lib"
+
+# macOS (Intel)
+curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz | tar xz
+export PDFIUM_DYNAMIC_LIB_PATH="$(pwd)/lib"
+
+# Linux (x86_64)
+curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz | tar xz
+export PDFIUM_DYNAMIC_LIB_PATH="$(pwd)/lib"
+```
+
 ### Shell Completions
 
 ```bash
