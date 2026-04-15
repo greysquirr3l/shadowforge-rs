@@ -20,10 +20,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Check if pdfium is available; emit helpful message if not.
 fn check_pdfium_availability() {
     let pdfium_paths = vec![
-        // macOS homebrew (custom install)
-        "/opt/homebrew/lib",
+        // Common Unix paths (user-compiled or manually installed)
         "/usr/local/lib",
-        // Linux
         "/usr/lib",
         "/usr/lib/x86_64-linux-gnu",
         "/usr/lib/aarch64-linux-gnu",
