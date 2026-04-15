@@ -8,6 +8,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`PdfError::BindFailed` variant** — dedicated error variant for pdfium
+  shared-library binding failures, distinct from `MalformedCoverData`; surfaces
+  to users as `UnsupportedCoverType` so CLI/API consumers can distinguish setup
+  problems from corrupted inputs
+- **pdfium build-time auto-detection** — `build.rs` now checks for the pdfium
+  shared library at build time (only when the `pdf` feature is enabled) and
+  emits actionable `cargo:warning` messages when it is not found
+- **`simd` feature documented** — added to the feature table in
+  `docs/src/guide/installation.md` and `README.md`
+
+### Changed
+
+- **pdfium search paths expanded** — macOS search now includes
+  `/opt/homebrew/lib` (Homebrew) and `/opt/local/lib` (MacPorts) in addition to
+  `/usr/local/lib` and `/usr/lib`
+- **`PDFIUM_DYNAMIC_LIB_PATH` uses `env::var_os`** — accepts any valid
+  filesystem path, not only valid-UTF-8 paths
+- **Build rerun trigger corrected** — replaced ineffective
+  `cargo:rerun-if-changed=unknown` with `cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS`
+- **`--no-default-features` warning clarified** — build warning now shows
+  `--no-default-features --features corpus,adaptive` to disable only PDF rather
+  than all features
+- **`cargo install` package name corrected** — README and docs now reference
+  `cargo install shadowforge` (matching `Cargo.toml` `name`) instead of
+  `shadowforge-rs`
+
 ## [0.3.2] — 2026-04-15
 
 ### Security
