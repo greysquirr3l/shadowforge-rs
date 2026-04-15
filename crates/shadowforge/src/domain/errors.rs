@@ -222,6 +222,12 @@ pub enum PdfError {
     /// The PDF document is encrypted and cannot be processed.
     #[error("PDF is encrypted and cannot be processed")]
     Encrypted,
+    /// Failed to bind or load the pdfium shared library at runtime.
+    #[error("pdfium library binding failed: {reason}")]
+    BindFailed {
+        /// Details about which binding attempts were tried and why they failed.
+        reason: String,
+    },
 }
 
 // ─── DistributionError ────────────────────────────────────────────────────────
