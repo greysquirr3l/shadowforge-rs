@@ -28,7 +28,9 @@ shadowforge-rs uses optional features to control which capabilities are compiled
 |---------|---------|---------|
 | `pdf` | ✅ | PDF embedding/extraction and page rasterisation (requires pdfium) |
 | `corpus` | ✅ | Corpus-based steganography (zero-modification cover selection) |
-| `adaptive` | ✅ | Adaptive embedding (STC-inspired steganalysis evasion) || `simd` | ❌ | SIMD-accelerated operations (for performance-critical deployments) |
+| `adaptive` | ✅ | Adaptive embedding (STC-inspired steganalysis evasion) |
+| `simd` | ❌ | SIMD-accelerated operations (for performance-critical deployments) |
+
 ### Building with Specific Features
 
 ```bash
