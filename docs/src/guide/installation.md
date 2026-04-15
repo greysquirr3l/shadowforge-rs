@@ -28,8 +28,7 @@ shadowforge-rs uses optional features to control which capabilities are compiled
 |---------|---------|---------|
 | `pdf` | ✅ | PDF embedding/extraction and page rasterisation (requires pdfium) |
 | `corpus` | ✅ | Corpus-based steganography (zero-modification cover selection) |
-| `adaptive` | ✅ | Adaptive embedding (STC-inspired steganalysis evasion) |
-
+| `adaptive` | ✅ | Adaptive embedding (STC-inspired steganalysis evasion) || `simd` | ❌ | SIMD-accelerated operations (for performance-critical deployments) |
 ### Building with Specific Features
 
 ```bash
@@ -56,7 +55,10 @@ PDF page rasterisation requires the pdfium shared library. Without it, PDF conte
 The build process will auto-detect pdfium if:
 
 - Set via the `PDFIUM_DYNAMIC_LIB_PATH` environment variable
-- Found in a standard system library path (`/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`, `/usr/lib/aarch64-linux-gnu` on Linux/macOS; `C:\Program Files\pdfium\lib` on Windows)
+- Found in a standard system library path:
+  - macOS: `/opt/homebrew/lib` (Homebrew), `/opt/local/lib` (MacPorts), `/usr/local/lib`, `/usr/lib`
+  - Linux: `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`, `/usr/lib/aarch64-linux-gnu`
+  - Windows: `C:\Program Files\pdfium\lib`, `C:\Program Files (x86)\pdfium\lib`
 
 If pdfium is not found, the build will emit a warning. (Note: this warning only appears when the `pdf` feature is enabled; builds without it proceed silently.)
 
