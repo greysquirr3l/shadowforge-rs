@@ -979,7 +979,8 @@ fn map_pdf_runner_error(error: crate::domain::errors::PdfError) -> AppError {
         | crate::domain::errors::PdfError::RebuildFailed { reason }
         | crate::domain::errors::PdfError::EmbedFailed { reason }
         | crate::domain::errors::PdfError::ExtractFailed { reason }
-        | crate::domain::errors::PdfError::IoError { reason } => {
+        | crate::domain::errors::PdfError::IoError { reason }
+        | crate::domain::errors::PdfError::BindFailed { reason } => {
             AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData { reason })
         }
     }

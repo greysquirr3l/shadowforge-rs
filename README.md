@@ -127,8 +127,11 @@ cargo build --no-default-features
 # Disable only PDF
 cargo build --no-default-features --features corpus,adaptive
 
-# Enable only SIMD (for performance-critical deployments)
+# Enable SIMD in addition to defaults (for performance-critical deployments)
 cargo build --features simd
+
+# Enable only SIMD without defaults
+cargo build --no-default-features --features simd
 ```
 
 ### Installing from crates.io
@@ -172,6 +175,7 @@ The build process will auto-detect pdfium if:
 
 - Set via `PDFIUM_DYNAMIC_LIB_PATH` environment variable
 - Found in a standard system library directory (`/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`, `/usr/lib/aarch64-linux-gnu` on Linux/macOS; `C:\Program Files\pdfium\lib` on Windows)
+- Found via the OS dynamic loader's configured library search paths
 
 If pdfium is not found, the build will emit a warning with setup instructions.
 
