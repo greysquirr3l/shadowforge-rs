@@ -8,6 +8,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-04-15
+
+### Security
+
+- **rustls-webpki 0.103.10 → 0.103.12** — resolves RUSTSEC-2026-0098 (URI name
+  constraints incorrectly accepted) and RUSTSEC-2026-0099 (wildcard certificate
+  name constraint bypass); transitively pulled in via `ureq → rustls`
+
 ## [0.3.1] — 2026-04-15
 
 ### Fixed
