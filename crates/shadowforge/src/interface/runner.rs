@@ -982,11 +982,11 @@ fn map_pdf_runner_error(error: crate::domain::errors::PdfError) -> AppError {
         | crate::domain::errors::PdfError::IoError { reason } => {
             AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData { reason })
         }
-        crate::domain::errors::PdfError::BindFailed { reason } => AppError::Stego(
-            crate::domain::errors::StegoError::UnsupportedCoverType {
+        crate::domain::errors::PdfError::BindFailed { reason } => {
+            AppError::Stego(crate::domain::errors::StegoError::UnsupportedCoverType {
                 reason: format!("pdfium library is not available: {reason}"),
-            },
-        ),
+            })
+        }
     }
 }
 

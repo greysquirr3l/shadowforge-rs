@@ -109,5 +109,7 @@ fn check_pdfium_availability() {
         "cargo:warning=  Windows: Download from https://github.com/bblanchon/pdfium-binaries/"
     );
     println!("cargo:warning=");
-    println!("cargo:warning=Or disable only PDF: cargo build --no-default-features --features corpus,adaptive");
+    println!(
+        "cargo:warning=Or disable only PDF: cargo build --no-default-features --features corpus,adaptive"
+    );
 }
