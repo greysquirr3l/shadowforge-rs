@@ -171,8 +171,7 @@ render-to-PNG pipeline is unavailable.
 The build process will auto-detect pdfium if:
 
 - Set via `PDFIUM_DYNAMIC_LIB_PATH` environment variable
-- Installed in common system paths (`/opt/homebrew/lib`, `/usr/lib`, etc.)
-- Already downloaded and available on the system PATH
+- Found in a standard system library directory (`/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`, `/usr/lib/aarch64-linux-gnu` on Linux/macOS; `C:\Program Files\pdfium\lib` on Windows)
 
 If pdfium is not found, the build will emit a warning with setup instructions.
 

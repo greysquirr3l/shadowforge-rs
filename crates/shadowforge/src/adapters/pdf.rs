@@ -58,11 +58,11 @@ impl PdfProcessorImpl {
             }
         }
 
-        // 2. Try auto-downloaded pdfium (built by cargo with pdfium_download feature)
+        // 2. Try system library (searched via the OS dynamic linker)
         match Pdfium::bind_to_system_library() {
             Ok(bindings) => return Ok(Pdfium::new(bindings)),
             Err(error) => {
-                bind_errors.push(format!("auto-downloaded pdfium: {error}"));
+                bind_errors.push(format!("system library: {error}"));
             }
         }
 
@@ -77,10 +77,11 @@ impl PdfProcessorImpl {
         Err(PdfError::RenderFailed {
             page: 0,
             reason: format!(
-                "Failed to load pdfium library. Auto-download during build should have handled this.\n\
-                 If you have a custom pdfium build, set PDFIUM_DYNAMIC_LIB_PATH=/path/to/lib.\n\
-                 Paths tried: {}",
-                bind_errors.join(", ")
+                "Failed to load pdfium library. Attempted: {}.\n\
+                 Download a prebuilt binary from https://github.com/bblanchon/pdfium-binaries/ \n\
+                 and set PDFIUM_DYNAMIC_LIB_PATH=/path/to/lib, \n\
+                 or disable the pdf feature with --no-default-features.",
+                bind_errors.join("; ")
             ),
         })
     }
