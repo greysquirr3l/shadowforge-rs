@@ -9,54 +9,81 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .git_commit_timestamp()
         .emit()?;
 
-    // Check if PDF feature is enabled
-    if cfg!(feature = "pdf") {
+    // CARGO_FEATURE_PDF is set by Cargo when the `pdf` feature is enabled.
+    // cfg!(feature = ...) does not reflect enabled features in build scripts.
+    if env::var("CARGO_FEATURE_PDF").is_ok() {
         check_pdfium_availability();
     }
 
     Ok(())
 }
 
-/// Check if pdfium is available; emit helpful message if not.
+/// Check if the pdfium shared library is findable; emit a warning only when it is not.
 fn check_pdfium_availability() {
-    let pdfium_paths = vec![
-        // Common Unix paths (user-compiled or manually installed)
-        "/usr/local/lib",
-        "/usr/lib",
-        "/usr/lib/x86_64-linux-gnu",
-        "/usr/lib/aarch64-linux-gnu",
-        // Windows
-        "C:\\Program Files\\pdfium\\lib",
-        "C:\\Program Files (x86)\\pdfium\\lib",
-    ];
+    // Re-run this check whenever the user changes the override variable.
+    println!("cargo:rerun-if-env-changed=PDFIUM_DYNAMIC_LIB_PATH");
 
     let env_var = "PDFIUM_DYNAMIC_LIB_PATH";
-    if let Ok(custom_path) = env::var(env_var)
-        && Path::new(&custom_path).exists()
-    {
-        println!("cargo:warning=pdfium detected at {custom_path}");
+    if let Ok(custom_path) = env::var(env_var) {
+        // User explicitly configured the path — only warn if it does not exist.
+        if !Path::new(&custom_path).exists() {
+            println!(
+                "cargo:warning=PDFIUM_DYNAMIC_LIB_PATH is set to '{custom_path}' but the path does not exist."
+            );
+        }
         return;
     }
 
-    // Check standard paths
-    for path in &pdfium_paths {
-        if Path::new(path).exists() {
-            println!("cargo:warning=pdfium auto-detected at {path}");
-            println!("cargo:warning=Set PDFIUM_DYNAMIC_LIB_PATH={path} to use it explicitly");
+    // Platform-specific library filename for the build target.
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let lib_name: &str = if target_os == "macos" {
+        "libpdfium.dylib"
+    } else if target_os == "windows" {
+        "pdfium.dll"
+    } else {
+        "libpdfium.so"
+    };
+
+    // Standard installation directories per platform.
+    let search_dirs: &[&str] = if target_os == "windows" {
+        &[
+            "C:\\Program Files\\pdfium\\lib",
+            "C:\\Program Files (x86)\\pdfium\\lib",
+        ]
+    } else {
+        &[
+            "/usr/local/lib",
+            "/usr/lib",
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/lib/aarch64-linux-gnu",
+        ]
+    };
+
+    for dir in search_dirs {
+        if Path::new(dir).join(lib_name).exists() {
+            // Found in a standard location — no noise.
             return;
         }
     }
 
-    // Not found — emit instructions
-    println!("cargo:warning=pdfium library not found. PDF features will fail at runtime.");
+    // Not found in any standard location — emit setup instructions.
+    println!(
+        "cargo:warning=pdfium library ({lib_name}) not found. PDF features will fail at runtime."
+    );
     println!("cargo:warning=");
     println!("cargo:warning=To set up pdfium:");
-    println!("cargo:warning=  macOS:   Download from https://pdfium.googlesource.com/");
+    println!(
+        "cargo:warning=  macOS:   Download from https://github.com/bblanchon/pdfium-binaries/"
+    );
     println!(
         "cargo:warning=           Extract and set: export PDFIUM_DYNAMIC_LIB_PATH=/path/to/lib"
     );
-    println!("cargo:warning=  Linux:   apt install libpdfium (if available) or build from source");
-    println!("cargo:warning=  Windows: Download prebuilt or build from source");
+    println!(
+        "cargo:warning=  Linux:   Download from https://github.com/bblanchon/pdfium-binaries/ or build from source"
+    );
+    println!(
+        "cargo:warning=  Windows: Download from https://github.com/bblanchon/pdfium-binaries/"
+    );
     println!("cargo:warning=");
     println!("cargo:warning=Or disable PDF: cargo build --no-default-features");
 }
