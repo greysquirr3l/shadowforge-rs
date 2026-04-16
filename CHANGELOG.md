@@ -11,6 +11,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **`PdfError::BindFailed` variant** — dedicated error variant for pdfium
+  to users as `UnsupportedCoverType` so CLI/API consumers can distinguish setup
+  problems from corrupted inputs
+- **pdfium build-time auto-detection** — `build.rs` now checks for the pdfium
+  emits actionable `cargo:warning` messages when it is not found
+- **`simd` feature documented** — added to the feature table in
+
+### Changed
+
+- **pdfium search paths expanded** — macOS search now includes
+  `/usr/local/lib` and `/usr/lib`
+- **`PDFIUM_DYNAMIC_LIB_PATH` uses `env::var_os`** — accepts any valid
+- **Build rerun trigger corrected** — replaced ineffective
+- **`--no-default-features` warning clarified** — build warning now shows
+  than all features
+- **`cargo install` package name corrected** — README and docs now reference
+  `shadowforge-rs`
+
+## [Unreleased]
+
+## [0.3.3] — 2026-04-15
+
+### Added
+
+- **`PdfError::BindFailed` variant** — dedicated error variant for pdfium
   shared-library binding failures, distinct from `MalformedCoverData`; surfaces
   to users as `UnsupportedCoverType` so CLI/API consumers can distinguish setup
   problems from corrupted inputs
@@ -19,6 +43,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   emits actionable `cargo:warning` messages when it is not found
 - **`simd` feature documented** — added to the feature table in
   `docs/src/guide/installation.md` and `README.md`
+- **`AppError::Cli` variant** — dedicated error variant for CLI validation and
+  interface I/O failures, distinct from domain errors; all runner-side parse
+  errors and filesystem errors now surface as `cli: {reason}` instead of
+  leaking internal domain error types
+- **Dependabot configuration** — weekly Cargo and GitHub Actions dependency
+  updates; patch and minor bumps auto-merge once CI passes
 
 ### Changed
 
@@ -35,6 +65,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **`cargo install` package name corrected** — README and docs now reference
   `cargo install shadowforge` (matching `Cargo.toml` `name`) instead of
   `shadowforge-rs`
+- **clap argument contracts tightened** — `--cover` and `--output` (embed) and
+  `--input` and `--output` (extract) gain `conflicts_with = "amnesia"` so
+  amnesiac mode has an unambiguous argument contract; `--deniable` gains
+  `conflicts_with = "amnesia"` so the silently-ignored combination is rejected
+  at parse time; `--platform` gains `required_if_eq("profile", "survivable")`
+- **UTF-8 payload validation hardened** — `--scrub-style` now uses strict
+  `String::from_utf8` rather than lossy conversion; binary payloads receive a
+  clear error instead of silent data corruption
+- **`--profile`/`--platform` single-cover embed** — now emits a compatibility
+  warning pointing users to `embed-distributed` rather than hard-erroring
 
 ## [0.3.2] — 2026-04-15
 
