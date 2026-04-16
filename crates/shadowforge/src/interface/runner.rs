@@ -20,10 +20,18 @@ use super::cli::{self, Cli, Commands};
 
 /// Run the CLI. Returns `Ok(())` on success.
 ///
+/// Unknown subcommands and invalid arguments are handled by clap: it prints a
+/// formatted error with suggestions and exits with code 2.  Using
+/// [`Cli::try_parse`] here makes that handoff explicit rather than relying on
+/// the implicit `process::exit` inside [`Cli::parse`].
+///
 /// # Errors
 /// Returns [`AppError`] on any service failure.
 pub fn run() -> Result<(), AppError> {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        Err(e) => e.exit(), // prints clap-formatted message, exits with code 2
+    };
     dispatch(cli)
 }
 
@@ -1442,6 +1450,7 @@ mod tests {
     use crate::domain::errors::CryptoError;
     use crate::domain::types::{CoverMediaKind, StegoTechnique};
     use crate::interface::cli;
+    use clap::Parser as _;
     use image::{DynamicImage, Rgba, RgbaImage};
     use std::fs;
     use tempfile::tempdir;
@@ -1706,6 +1715,40 @@ mod tests {
         assert!(out.contains("Technique"));
         assert!(out.contains("Chi-square"));
         assert!(out.contains("Recommended"));
+    }
+
+    // ─── CLI subcommand safety ─────────────────────────────────────────────
+
+    /// Verify that clap rejects an unrecognised top-level subcommand without
+    /// panicking.  This documents the contract: unknown input → `Err`, not a
+    /// panic or a silent `Ok`.
+    #[test]
+    fn unknown_top_level_subcommand_is_rejected() {
+        let result = cli::Cli::try_parse_from(["shadowforge", "not-a-real-command"]);
+        assert!(
+            result.is_err(),
+            "clap must reject unknown top-level subcommands with Err"
+        );
+    }
+
+    /// Verify that clap rejects an unrecognised sub-subcommand under a known
+    /// command without panicking.
+    #[test]
+    fn unknown_sub_subcommand_is_rejected() {
+        let result = cli::Cli::try_parse_from(["shadowforge", "keygen", "not-a-real-subcmd"]);
+        assert!(
+            result.is_err(),
+            "clap must reject unknown sub-subcommands with Err"
+        );
+    }
+
+    #[test]
+    fn version_subcommand_is_accepted() {
+        let result = cli::Cli::try_parse_from(["shadowforge", "version"]);
+        assert!(
+            result.is_ok(),
+            "version subcommand must parse without error"
+        );
     }
 
     #[test]
