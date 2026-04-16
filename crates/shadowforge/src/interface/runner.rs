@@ -89,7 +89,9 @@ fn cmd_keygen(args: &cli::KeygenArgs) -> Result<(), AppError> {
 
 fn cmd_keygen_generate(args: &cli::KeygenArgs) -> Result<(), AppError> {
     let Some(dir) = args.output.as_ref() else {
-        return Err(cli_error("--output is required when no keygen subcommand is used"));
+        return Err(cli_error(
+            "--output is required when no keygen subcommand is used",
+        ));
     };
     let Some(algorithm) = args.algorithm else {
         return Err(cli_error(
@@ -161,7 +163,9 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             target_vocab_size: 1000,
         };
         let text = String::from_utf8(payload_bytes).map_err(|_| {
-            cli_error("--scrub-style requires a UTF-8 payload file; binary payloads are not supported")
+            cli_error(
+                "--scrub-style requires a UTF-8 payload file; binary payloads are not supported",
+            )
         })?;
         let result = ScrubService::scrub(&text, &profile, &scrubber)?;
         payload_bytes = result.into_bytes();
@@ -180,14 +184,16 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             &pipeline,
         )?;
     } else if args.deniable {
-        let cover_path = args.cover.as_ref().ok_or_else(|| {
-            cli_error("--cover is required for deniable embedding")
-        })?;
+        let cover_path = args
+            .cover
+            .as_ref()
+            .ok_or_else(|| cli_error("--cover is required for deniable embedding"))?;
         let cover = load_cover_from_path(cover_path, technique)?;
 
-        let decoy_path = args.decoy_payload.as_ref().ok_or_else(|| {
-            cli_error("--decoy-payload is required for deniable embedding")
-        })?;
+        let decoy_path = args
+            .decoy_payload
+            .as_ref()
+            .ok_or_else(|| cli_error("--decoy-payload is required for deniable embedding"))?;
         let decoy_bytes = fs_read(decoy_path)?;
         let primary_key = match &args.key {
             Some(p) => fs_read(p)?,
@@ -226,9 +232,10 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             ));
         }
 
-        let cover_path = args.cover.as_ref().ok_or_else(|| {
-            cli_error("--cover is required when not using --amnesia")
-        })?;
+        let cover_path = args
+            .cover
+            .as_ref()
+            .ok_or_else(|| cli_error("--cover is required when not using --amnesia"))?;
         let cover = load_cover_from_path(cover_path, technique)?;
         let payload = Payload::from_bytes(payload_bytes);
         let stego = EmbedService::embed(cover, &payload, embedder.as_ref())?;
