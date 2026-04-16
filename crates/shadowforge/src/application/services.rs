@@ -33,6 +33,12 @@ use crate::domain::types::{
 /// Unified application error wrapping all domain errors.
 #[derive(Debug, Error)]
 pub enum AppError {
+    /// CLI validation and interface I/O error.
+    #[error("cli: {reason}")]
+    Cli {
+        /// Human-readable reason for invalid CLI input or shell I/O failure.
+        reason: String,
+    },
     /// Crypto subsystem error.
     #[error("crypto: {0}")]
     Crypto(#[from] CryptoError),
@@ -789,6 +795,22 @@ mod tests {
     }
 
     // ─── AppError wraps all domain errors ─────────────────────────────────
+
+    #[test]
+    fn app_error_cli_display_contains_prefix_and_reason() {
+        let err = AppError::Cli {
+            reason: "missing --output flag".into(),
+        };
+        let text = err.to_string();
+        assert!(
+            text.starts_with("cli: "),
+            "expected 'cli: ' prefix, got: {text}"
+        );
+        assert!(
+            text.contains("missing --output flag"),
+            "expected reason in display, got: {text}"
+        );
+    }
 
     #[test]
     fn app_error_wraps_stego() {
