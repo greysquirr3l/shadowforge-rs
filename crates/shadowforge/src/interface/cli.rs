@@ -229,7 +229,7 @@ pub struct EmbedArgs {
     #[arg(long)]
     pub scrub_style: bool,
     /// Enable deniable dual-payload embedding.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "amnesia")]
     pub deniable: bool,
     /// Decoy payload path (used with `--deniable`).
     #[arg(long, required_if_eq("deniable", "true"))]
