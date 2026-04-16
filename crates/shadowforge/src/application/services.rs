@@ -33,6 +33,12 @@ use crate::domain::types::{
 /// Unified application error wrapping all domain errors.
 #[derive(Debug, Error)]
 pub enum AppError {
+    /// CLI validation and interface I/O error.
+    #[error("cli: {reason}")]
+    Cli {
+        /// Human-readable reason for invalid CLI input or shell I/O failure.
+        reason: String,
+    },
     /// Crypto subsystem error.
     #[error("crypto: {0}")]
     Crypto(#[from] CryptoError),
