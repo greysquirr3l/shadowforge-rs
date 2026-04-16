@@ -8,6 +8,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Security Audit workflow** — dedicated `security.yml` workflow runs
+  Gitleaks secret scanning and `cargo audit` on every push to `main`, every PR,
+  and on a weekly schedule
+- **CodeQL Analysis workflow** — static analysis for Rust via GitHub's CodeQL
+  engine on push, PR, and weekly schedule
+
+### Fixed
+
+- **Security Audit `checks: write` permission** — `rustsec/audit-check@v2`
+  and `gitleaks-action` require `checks: write` to post Check Run annotations;
+  the workflow previously only set `contents: read`, causing every audit run
+  to fail with "Resource not accessible by integration"
+
+### Security
+
+- **Acknowledged transitive advisories in `deny.toml`** — `RUSTSEC-2026-0097`
+  (`rand` unsound — aliased mutable reference under custom logger) and
+  `RUSTSEC-2024-0384` (`instant` unmaintained) are pulled in transitively
+  with no available patch from our side; both are documented with rationale
+  in `deny.toml`
+
+### Dependencies
+
+- `codecov/codecov-action` 4 → 6
+- `softprops/action-gh-release` 2.3.2 → 3.0.0
+- `dependabot/fetch-metadata` 2 → 3
+- `actions/deploy-pages` 4 → 5
+- `actions/checkout` 4.2.2 → 6.0.2
+
 ## [0.3.3] — 2026-04-15
 
 ### Added
