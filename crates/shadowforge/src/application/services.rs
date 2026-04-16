@@ -797,6 +797,22 @@ mod tests {
     // ─── AppError wraps all domain errors ─────────────────────────────────
 
     #[test]
+    fn app_error_cli_display_contains_prefix_and_reason() {
+        let err = AppError::Cli {
+            reason: "missing --output flag".into(),
+        };
+        let text = err.to_string();
+        assert!(
+            text.starts_with("cli: "),
+            "expected 'cli: ' prefix, got: {text}"
+        );
+        assert!(
+            text.contains("missing --output flag"),
+            "expected reason in display, got: {text}"
+        );
+    }
+
+    #[test]
     fn app_error_wraps_stego() {
         let stego_err = StegoError::NoPayloadFound;
         let app_err = AppError::from(stego_err);

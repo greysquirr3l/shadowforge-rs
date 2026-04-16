@@ -208,10 +208,10 @@ pub struct EmbedArgs {
     #[arg(long)]
     pub input: PathBuf,
     /// Path to the cover medium (omit for `--amnesia`).
-    #[arg(long, required_unless_present = "amnesia")]
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
     pub cover: Option<PathBuf>,
     /// Output path for the stego file.
-    #[arg(long, required_unless_present = "amnesia")]
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
     pub output: Option<PathBuf>,
     /// Steganographic technique.
     #[arg(long, value_enum)]
@@ -246,10 +246,10 @@ pub struct EmbedArgs {
 #[derive(Parser, Debug)]
 pub struct ExtractArgs {
     /// Path to the stego file (omit for `--amnesia`).
-    #[arg(long, required_unless_present = "amnesia")]
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
     pub input: Option<PathBuf>,
     /// Output path for the extracted payload.
-    #[arg(long, required_unless_present = "amnesia")]
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
     pub output: Option<PathBuf>,
     /// Steganographic technique.
     #[arg(long, value_enum)]
