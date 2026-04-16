@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -31,8 +31,13 @@ jobs:
           languages: ${{ matrix.language }}
           queries: security-and-quality
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - name: Build workspace with all features
+        run: cargo build --workspace --all-features
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
