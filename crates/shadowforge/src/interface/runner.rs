@@ -227,9 +227,11 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
         eprintln!("Deniable embedding complete");
     } else {
         if !matches!(args.profile, cli::Profile::Standard) || args.platform.is_some() {
-            return Err(cli_error(
-                "--profile and --platform are only supported by embed-distributed",
-            ));
+            eprintln!(
+                "warning: single-cover `embed` accepts --profile/--platform for compatibility, \
+but these options are ignored here; use `embed-distributed` for profile/platform-aware \
+distributed embedding behavior"
+            );
         }
 
         let cover_path = args
