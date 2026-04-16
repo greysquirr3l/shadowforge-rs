@@ -1,6 +1,6 @@
 # Threat Model
 
-This document describes the threat model for shadowforge-rs and the mitigations
+This document describes the threat model for shadowforge and the mitigations
 implemented for each threat class. It is a living document — each Phase adds
 mitigations and this document is updated to reflect them.
 
@@ -19,7 +19,7 @@ CNN-based detectors trained on known steganographic signatures. They apply
 chi-square analysis, RS analysis, Sample Pair analysis, and model-based
 detection (identifying covers that don't match their claimed camera model).
 
-**Mitigations in shadowforge-rs**:
+**Mitigations in shadowforge**:
 
 - `AdaptiveEmbedder`: STC-inspired adversarial permutation optimisation.
   Minimises chi-square score, RS residual, and Sample Pair asymmetry by
@@ -50,7 +50,7 @@ per session and prefer `CorpusEmbedder` for highest-risk communications.
 legal authority to compel key disclosure. "Provide your decryption keys or
 you will not be permitted to leave / you will be detained."
 
-**Mitigations in shadowforge-rs**:
+**Mitigations in shadowforge**:
 
 - `DeniableEmbedder`: Two payloads embedded in one cover. Key A decrypts an
   innocent decoy payload. Key B decrypts the real payload. The cover is
@@ -78,7 +78,7 @@ nation-state can observe communication patterns. Person A sent a JPEG to
 Person B, who sent one to Person C, who sent one to a known journalist. The
 content is invisible but the network graph is the message.
 
-**Mitigations in shadowforge-rs**:
+**Mitigations in shadowforge**:
 
 - `DeadDropEncoder` (dead drop mode): Generates stego covers optimised for
   posting to public platforms (Instagram, Imgur, Telegram, etc.). The sender
@@ -102,7 +102,7 @@ identifying information and vary posting times.
 or have physical access to the device. They may keylog, screen-capture, or
 exfiltrate files as they're written.
 
-**Mitigations in shadowforge-rs**:
+**Mitigations in shadowforge**:
 
 - `AmnesiaPipeline` (amnesiac mode, `--amnesia`): The entire embed/extract
   pipeline runs in memory only. Input from stdin, output to stdout. No temp
@@ -126,7 +126,7 @@ filesystem forensics and user-space memory analysis, not against rootkits.
 shards distributed across multiple countries. Legal compulsion via MLAT
 (Mutual Legal Assistance Treaty) requests, subpoenas, or local legal orders.
 
-**Mitigations in shadowforge-rs**:
+**Mitigations in shadowforge**:
 
 - Geographic threshold distribution (`--geo-manifest`): Annotates K-of-N
   shards with jurisdictional metadata. Reconstruction requires physical or
@@ -155,7 +155,7 @@ identify individuals from writing style — word frequency, sentence length
 distribution, rare vocabulary, punctuation patterns. Even an encrypted,
 stegographically hidden document can expose its author if decrypted.
 
-**Mitigations in shadowforge-rs**:
+**Mitigations in shadowforge**:
 
 - `StyloScrubber` (`--scrub-style` on `embed`): Normalises text payload
   before embedding. Replaces rare vocabulary with common synonyms,
@@ -181,7 +181,7 @@ to the adversary. The journalist needs to identify which source leaked it.
 **Note**: This threat is the inverse of most — it protects the journalist's
 tradecraft, not the source's communication.
 
-**Mitigations in shadowforge-rs**:
+**Mitigations in shadowforge**:
 
 - `ForensicWatermarker` (`watermark tripwire` subcommand): Embeds a unique,
   imperceptible LSB permutation in each copy of the cover, keyed from a

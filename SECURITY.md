@@ -2,7 +2,7 @@
 
 ## ⚠️ Pre-Production Status
 
-**shadowforge-rs has NOT been externally security audited.**
+**shadowforge has NOT been externally security audited.**
 
 While it uses production-grade cryptography (NIST PQC standards: ML-KEM-1024,
 ML-DSA-87), has comprehensive test coverage, and is designed for adversarial
@@ -11,7 +11,7 @@ until Phase 18 (external audit) is complete.**
 
 If you are a journalist or whistleblower in immediate danger:
 - Use established, audited tools (Signal, Tor, SecureDrop) as your primary channel
-- Consider shadowforge-rs as a supplementary layer, not a replacement
+- Consider shadowforge as a supplementary layer, not a replacement
 - Read `OPERATIONAL_SECURITY.md` for threat-model-appropriate guidance
 
 ---
