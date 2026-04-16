@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.4] — 2026-04-16
+
 ### Added
 
 - **Security Audit workflow** — dedicated `security.yml` workflow runs
@@ -275,7 +277,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Pre-production: external security audit pending (planned for v0.2.0)
 - PDF support requires pdfium system library — see README for installation
 
-[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.4
 [0.3.3]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.3
 [0.3.2]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.2
 [0.3.1]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.1
