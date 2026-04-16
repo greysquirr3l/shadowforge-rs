@@ -77,6 +77,9 @@ image = { version = "0.25", default-features = false, features = [
 hound = "3.5"
 
 # ─── PDF ──────────────────────────────────────────────────────────────────────
+# Both crates are intentionally enabled by the `pdf` feature:
+# - lopdf: structural parse/write and metadata/content-stream manipulation
+# - pdfium-render: page rasterisation pipeline and rendering checks
 lopdf         = { version = "0.40", optional = true }
 pdfium-render = { version = "0.8", features = ["thread_safe"], optional = true }
 
