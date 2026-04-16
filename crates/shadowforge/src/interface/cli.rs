@@ -208,11 +208,11 @@ pub struct EmbedArgs {
     #[arg(long)]
     pub input: PathBuf,
     /// Path to the cover medium (omit for `--amnesia`).
-    #[arg(long)]
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
     pub cover: Option<PathBuf>,
     /// Output path for the stego file.
-    #[arg(long)]
-    pub output: PathBuf,
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
+    pub output: Option<PathBuf>,
     /// Steganographic technique.
     #[arg(long, value_enum)]
     pub technique: Technique,
@@ -220,7 +220,7 @@ pub struct EmbedArgs {
     #[arg(long, value_enum, default_value = "standard")]
     pub profile: Profile,
     /// Target platform (required when profile = survivable).
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, required_if_eq("profile", "survivable"))]
     pub platform: Option<Platform>,
     /// Amnesiac mode: read cover from stdin, write stego to stdout.
     #[arg(long)]
@@ -229,16 +229,16 @@ pub struct EmbedArgs {
     #[arg(long)]
     pub scrub_style: bool,
     /// Enable deniable dual-payload embedding.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "amnesia")]
     pub deniable: bool,
     /// Decoy payload path (used with `--deniable`).
-    #[arg(long)]
+    #[arg(long, required_if_eq("deniable", "true"))]
     pub decoy_payload: Option<PathBuf>,
     /// Decoy key path (used with `--deniable`).
-    #[arg(long)]
+    #[arg(long, requires = "deniable")]
     pub decoy_key: Option<PathBuf>,
     /// Primary key path (used with `--deniable`).
-    #[arg(long)]
+    #[arg(long, requires = "deniable")]
     pub key: Option<PathBuf>,
 }
 
@@ -246,11 +246,11 @@ pub struct EmbedArgs {
 #[derive(Parser, Debug)]
 pub struct ExtractArgs {
     /// Path to the stego file (omit for `--amnesia`).
-    #[arg(long)]
-    pub input: PathBuf,
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
+    pub input: Option<PathBuf>,
     /// Output path for the extracted payload.
-    #[arg(long)]
-    pub output: PathBuf,
+    #[arg(long, required_unless_present = "amnesia", conflicts_with = "amnesia")]
+    pub output: Option<PathBuf>,
     /// Steganographic technique.
     #[arg(long, value_enum)]
     pub technique: Technique,

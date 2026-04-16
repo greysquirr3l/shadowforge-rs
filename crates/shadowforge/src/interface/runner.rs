@@ -89,14 +89,14 @@ fn cmd_keygen(args: &cli::KeygenArgs) -> Result<(), AppError> {
 
 fn cmd_keygen_generate(args: &cli::KeygenArgs) -> Result<(), AppError> {
     let Some(dir) = args.output.as_ref() else {
-        return Err(AppError::Stego(StegoError::MalformedCoverData {
-            reason: "--output is required when no keygen subcommand is used".to_string(),
-        }));
+        return Err(cli_error(
+            "--output is required when no keygen subcommand is used",
+        ));
     };
     let Some(algorithm) = args.algorithm else {
-        return Err(AppError::Stego(StegoError::MalformedCoverData {
-            reason: "--algorithm is required when no keygen subcommand is used".to_string(),
-        }));
+        return Err(cli_error(
+            "--algorithm is required when no keygen subcommand is used",
+        ));
     };
 
     fs_create_dir_all(dir)?;
@@ -153,8 +153,7 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
     let technique = resolve_technique(args.technique);
     let embedder = build_embedder(technique);
 
-    let payload_bytes = fs_read(&args.input)?;
-    let mut payload = Payload::from_bytes(payload_bytes);
+    let mut payload_bytes = fs_read(&args.input)?;
 
     if args.scrub_style {
         let scrubber = crate::adapters::scrubber::StyloScrubberImpl::new();
@@ -163,14 +162,18 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             target_avg_sentence_len: 15.0,
             target_vocab_size: 1000,
         };
-        let text = String::from_utf8_lossy(payload.as_bytes());
+        let text = String::from_utf8(payload_bytes).map_err(|_| {
+            cli_error(
+                "--scrub-style requires a UTF-8 payload file; binary payloads are not supported",
+            )
+        })?;
         let result = ScrubService::scrub(&text, &profile, &scrubber)?;
-        payload = Payload::from_bytes(result.into_bytes());
+        payload_bytes = result.into_bytes();
     }
 
     if args.amnesia {
         let pipeline = crate::adapters::opsec::AmnesiaPipelineImpl::new();
-        let mut payload_cursor = io::Cursor::new(payload.as_bytes().to_vec());
+        let mut payload_cursor = io::Cursor::new(payload_bytes.as_slice());
         let mut cover_input = io::stdin().lock();
         let mut output = io::stdout().lock();
         crate::application::services::AmnesiaPipelineService::embed_in_memory(
@@ -181,18 +184,16 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             &pipeline,
         )?;
     } else if args.deniable {
-        let cover_path = args.cover.as_ref().ok_or_else(|| {
-            crate::domain::errors::DeniableError::EmbedFailed {
-                reason: "--cover is required for deniable embedding".into(),
-            }
-        })?;
+        let cover_path = args
+            .cover
+            .as_ref()
+            .ok_or_else(|| cli_error("--cover is required for deniable embedding"))?;
         let cover = load_cover_from_path(cover_path, technique)?;
 
-        let decoy_path = args.decoy_payload.as_ref().ok_or_else(|| {
-            crate::domain::errors::DeniableError::EmbedFailed {
-                reason: "--decoy-payload is required for deniable embedding".into(),
-            }
-        })?;
+        let decoy_path = args
+            .decoy_payload
+            .as_ref()
+            .ok_or_else(|| cli_error("--decoy-payload is required for deniable embedding"))?;
         let decoy_bytes = fs_read(decoy_path)?;
         let primary_key = match &args.key {
             Some(p) => fs_read(p)?,
@@ -203,7 +204,7 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             None => vec![1u8; 32],
         };
         let pair = crate::domain::types::DeniablePayloadPair {
-            real_payload: payload.as_bytes().to_vec(),
+            real_payload: payload_bytes,
             decoy_payload: decoy_bytes,
         };
         let keys = crate::domain::types::DeniableKeySet {
@@ -218,29 +219,33 @@ fn cmd_embed(args: &cli::EmbedArgs) -> Result<(), AppError> {
             embedder.as_ref(),
             &deniable,
         )?;
-        save_cover_to_path(&stego, &args.output)?;
+        let output_path = args
+            .output
+            .as_ref()
+            .ok_or_else(|| cli_error("--output is required when not using --amnesia"))?;
+        save_cover_to_path(&stego, output_path)?;
         eprintln!("Deniable embedding complete");
     } else {
-        // Note: profile and platform only apply to distributed embedding.
-        // Single-cover embedding uses the technique directly without profile constraints.
-        if matches!(args.profile, cli::Profile::Standard) {
-            // Standard profile: silent
-        } else {
+        if !matches!(args.profile, cli::Profile::Standard) || args.platform.is_some() {
             eprintln!(
-                "Note: --profile {:?} only applies to distributed embedding; \
-                 single-cover uses technique directly",
-                args.profile
+                "warning: single-cover `embed` accepts --profile/--platform for compatibility, \
+but these options are ignored here; use `embed-distributed` for profile/platform-aware \
+distributed embedding behavior"
             );
         }
 
-        let cover_path = args.cover.as_ref().ok_or_else(|| {
-            crate::domain::errors::StegoError::MalformedCoverData {
-                reason: "--cover is required when not using --amnesia".into(),
-            }
-        })?;
+        let cover_path = args
+            .cover
+            .as_ref()
+            .ok_or_else(|| cli_error("--cover is required when not using --amnesia"))?;
         let cover = load_cover_from_path(cover_path, technique)?;
+        let payload = Payload::from_bytes(payload_bytes);
         let stego = EmbedService::embed(cover, &payload, embedder.as_ref())?;
-        save_cover_to_path(&stego, &args.output)?;
+        let output_path = args
+            .output
+            .as_ref()
+            .ok_or_else(|| cli_error("--output is required when not using --amnesia"))?;
+        save_cover_to_path(&stego, output_path)?;
         eprintln!("Embedded {} bytes", payload.len());
     }
     Ok(())
@@ -262,9 +267,7 @@ fn cmd_extract(args: &cli::ExtractArgs) -> Result<(), AppError> {
             .lock()
             .take(MAX_STDIN_PAYLOAD)
             .read_to_end(&mut buf)
-            .map_err(|e| crate::domain::errors::StegoError::MalformedCoverData {
-                reason: format!("stdin read: {e}"),
-            })?;
+            .map_err(|e| cli_error(format!("stdin read: {e}")))?;
         let cover = load_cover(technique, &buf);
         let payload = if let Some(key) = deniable_key.as_deref() {
             let deniable = crate::adapters::stego::DualPayloadEmbedder;
@@ -277,13 +280,15 @@ fn cmd_extract(args: &cli::ExtractArgs) -> Result<(), AppError> {
         } else {
             ExtractService::extract(&cover, extractor.as_ref())?
         };
-        io::stdout().write_all(payload.as_bytes()).map_err(|e| {
-            crate::domain::errors::StegoError::MalformedCoverData {
-                reason: format!("stdout write: {e}"),
-            }
-        })?;
+        io::stdout()
+            .write_all(payload.as_bytes())
+            .map_err(|e| cli_error(format!("stdout write: {e}")))?;
     } else {
-        let stego = load_cover_from_path(&args.input, technique)?;
+        let input_path = args
+            .input
+            .as_ref()
+            .ok_or_else(|| cli_error("--input is required when not using --amnesia"))?;
+        let stego = load_cover_from_path(input_path, technique)?;
         let payload = if let Some(key) = deniable_key.as_deref() {
             let deniable = crate::adapters::stego::DualPayloadEmbedder;
             crate::application::services::DeniableEmbedService::extract_with_key(
@@ -295,7 +300,11 @@ fn cmd_extract(args: &cli::ExtractArgs) -> Result<(), AppError> {
         } else {
             ExtractService::extract(&stego, extractor.as_ref())?
         };
-        fs_write(&args.output, payload.as_bytes())?;
+        let output_path = args
+            .output
+            .as_ref()
+            .ok_or_else(|| cli_error("--output is required when not using --amnesia"))?;
+        fs_write(output_path, payload.as_bytes())?;
         eprintln!("Extracted {} bytes", payload.len());
     }
     Ok(())
@@ -823,11 +832,9 @@ fn cmd_corpus(args: &cli::CorpusArgs) -> Result<(), AppError> {
                         Some((w, h))
                     })
                     .ok_or_else(|| {
-                        AppError::Stego(StegoError::MalformedCoverData {
-                            reason: "--model requires --resolution in WIDTHxHEIGHT format \
-                                     (e.g. --resolution 1024x1024)"
-                                .to_string(),
-                        })
+                        cli_error(
+                            "--model requires --resolution in WIDTHxHEIGHT format (e.g. --resolution 1024x1024)",
+                        )
                     })?;
                 CorpusService::search_for_model(&index, &payload, model_id, res, *top)?
             } else {
@@ -933,30 +940,24 @@ fn cmd_cipher(args: &cli::CipherArgs) -> Result<(), AppError> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn fs_read(path: &Path) -> Result<Vec<u8>, AppError> {
-    std::fs::read(path).map_err(|e| {
-        AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData {
-            reason: format!("read {}: {e}", path.display()),
-        })
-    })
+    std::fs::read(path).map_err(|e| cli_error(format!("read {}: {e}", path.display())))
 }
 
 fn fs_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     if let Some(parent) = path.parent() {
         fs_create_dir_all(parent)?;
     }
-    std::fs::write(path, data).map_err(|e| {
-        AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData {
-            reason: format!("write {}: {e}", path.display()),
-        })
-    })
+    std::fs::write(path, data).map_err(|e| cli_error(format!("write {}: {e}", path.display())))
 }
 
 fn fs_create_dir_all(path: &Path) -> Result<(), AppError> {
-    std::fs::create_dir_all(path).map_err(|e| {
-        AppError::Stego(crate::domain::errors::StegoError::MalformedCoverData {
-            reason: format!("mkdir {}: {e}", path.display()),
-        })
-    })
+    std::fs::create_dir_all(path).map_err(|e| cli_error(format!("mkdir {}: {e}", path.display())))
+}
+
+fn cli_error(reason: impl Into<String>) -> AppError {
+    AppError::Cli {
+        reason: reason.into(),
+    }
 }
 
 fn map_media_error(error: crate::domain::errors::MediaError) -> AppError {
@@ -1538,8 +1539,8 @@ mod tests {
         fs::write(&key_path, &primary_key)?;
 
         let args = cli::ExtractArgs {
-            input: input_path,
-            output: output_path.clone(),
+            input: Some(input_path),
+            output: Some(output_path.clone()),
             technique: cli::Technique::Lsb,
             key: Some(key_path),
             amnesia: false,
