@@ -10,6 +10,7 @@ environments, **do not use this software to protect life-critical communications
 until Phase 18 (external audit) is complete.**
 
 If you are a journalist or whistleblower in immediate danger:
+
 - Use established, audited tools (Signal, Tor, SecureDrop) as your primary channel
 - Consider shadowforge as a supplementary layer, not a replacement
 - Read `OPERATIONAL_SECURITY.md` for threat-model-appropriate guidance
@@ -58,11 +59,12 @@ All key material is zeroized on drop (`zeroize` crate).
 ## Reporting Vulnerabilities
 
 Please report security vulnerabilities **privately** via GitHub Security
-Advisories: https://github.com/greysquirr3l/shadowforge-rs/security/advisories/new
+Advisories: <https://github.com/greysquirr3l/shadowforge-rs/security/advisories/new>
 
 Do not open public issues for security vulnerabilities.
 
 Include:
+
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact assessment
