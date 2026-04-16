@@ -1,32 +1,10 @@
 # Changelog
 
-All notable changes to shadowforge-rs are documented here.
+All notable changes to shadowforge are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
-
-## [Unreleased]
-
-### Added
-
-- **`PdfError::BindFailed` variant** — dedicated error variant for pdfium
-  to users as `UnsupportedCoverType` so CLI/API consumers can distinguish setup
-  problems from corrupted inputs
-- **pdfium build-time auto-detection** — `build.rs` now checks for the pdfium
-  emits actionable `cargo:warning` messages when it is not found
-- **`simd` feature documented** — added to the feature table in
-
-### Changed
-
-- **pdfium search paths expanded** — macOS search now includes
-  `/usr/local/lib` and `/usr/lib`
-- **`PDFIUM_DYNAMIC_LIB_PATH` uses `env::var_os`** — accepts any valid
-- **Build rerun trigger corrected** — replaced ineffective
-- **`--no-default-features` warning clarified** — build warning now shows
-  than all features
-- **`cargo install` package name corrected** — README and docs now reference
-  `shadowforge-rs`
 
 ## [Unreleased]
 
@@ -266,6 +244,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Pre-production: external security audit pending (planned for v0.2.0)
 - PDF support requires pdfium system library — see README for installation
 
-[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.3
+[0.3.2]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.2
+[0.3.1]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.1
+[0.3.0]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.0
 [0.2.0]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.2.0
 [0.1.0]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.1.0

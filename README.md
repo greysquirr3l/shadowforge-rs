@@ -1,4 +1,4 @@
-# shadowforge-rs
+# shadowforge
 
 ![Shadowforge](assets/img/shadowforge_logo.png)
 
@@ -12,7 +12,7 @@
 [![Coverage](https://img.shields.io/badge/Coverage-85%25-brightgreen)](coverage/tarpaulin-report.html)
 [![Security](https://img.shields.io/badge/Status-Pre--Audit-yellow)](SECURITY.md)
 
-**shadowforge-rs** is a quantum-resistant steganography toolkit for
+**shadowforge** is a quantum-resistant steganography toolkit for
 **journalists, whistleblowers, and dissidents** operating against
 nation-state adversaries.
 
@@ -105,7 +105,7 @@ profile (`~/.bashrc`, `~/.zshrc`, etc.).
 
 ## Building with Features
 
-shadowforge-rs uses Cargo's optional feature system to control which capabilities are compiled in. This allows users to reduce the attack surface and dependencies by disabling features they don't need.
+shadowforge uses Cargo's optional feature system to control which capabilities are compiled in. This allows users to reduce the attack surface and dependencies by disabling features they don't need.
 
 ### Available Features
 
@@ -136,7 +136,7 @@ cargo build --no-default-features --features simd
 
 ### Installing from crates.io
 
-When using shadowforge-rs as a dependency:
+When using shadowforge as a dependency:
 
 ```toml
 # In your Cargo.toml
