@@ -8,6 +8,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.5] — 2026-04-22
+
+### Fixed
+
+- **`cargo-deny` toolchain mismatch** — replaced `EmbarkStudios/cargo-deny-action@v2`
+  with an explicit toolchain install + `cargo install cargo-deny --locked`; the
+  action was resolving to a musl target that did not match the pinned 1.94.1
+  toolchain, causing every Supply Chain CI job to fail
+- **`cargo deny` flag ordering** — corrected invocation to
+  `cargo deny --all-features check` (global flag must precede the subcommand;
+  `cargo deny check --all-features` is rejected by the CLI)
+- **Security Audit `issues: write` permission** — `rustsec/audit-check@v2`
+  requires `issues: write` to file issues for new advisories; absence caused
+  "Resource not accessible by integration" on every audit run
+
+### Security
+
+- **rustls-webpki 0.103.12 → 0.103.13** — patches RUSTSEC-2026-0104 (reachable
+  panic in CRL parsing); pulled in transitively via `ureq → rustls`
+
+### Changed
+
+- `actions/checkout` 4.2.2 → 6.0.2 (security.yml)
+- `github/codeql-action` 3 → 4
+- `actions/upload-pages-artifact` 3 → 5
+
 ## [0.3.4] — 2026-04-16
 
 ### Added
@@ -33,7 +59,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   with no available patch from our side; both are documented with rationale
   in `deny.toml`
 
-### Dependencies
+### Changed
 
 - `codecov/codecov-action` 4 → 6
 - `softprops/action-gh-release` 2.3.2 → 3.0.0
@@ -277,7 +303,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Pre-production: external security audit pending (planned for v0.2.0)
 - PDF support requires pdfium system library — see README for installation
 
-[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.4
 [0.3.3]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.3
 [0.3.2]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.2
