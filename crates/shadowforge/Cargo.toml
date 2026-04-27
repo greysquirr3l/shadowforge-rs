@@ -81,7 +81,7 @@ hound = "3.5"
 # - lopdf: structural parse/write and metadata/content-stream manipulation
 # - pdfium-render: page rasterisation pipeline and rendering checks
 lopdf         = { version = "0.40", optional = true }
-pdfium-render = { version = "0.8", features = ["thread_safe"], optional = true }
+pdfium-render = { version = "0.9", features = ["thread_safe"], optional = true }
 
 # ─── Unicode / Text ───────────────────────────────────────────────────────────
 unicode-segmentation  = "1.11"
