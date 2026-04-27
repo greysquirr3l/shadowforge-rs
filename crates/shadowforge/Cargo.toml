@@ -23,7 +23,7 @@ path = "src/lib.rs"
 [dependencies]
 # Post-Quantum Cryptography — NIST finalists, pure Rust
 # NOTE: RC versions pinned exactly — audit on each bump.
-ml-kem = { version = "=0.3.0-rc.1" }
+ml-kem = { version = "=0.3.0-rc.2" }
 ml-dsa = { version = "=0.1.0-rc.8" }
 
 # Symmetric crypto
