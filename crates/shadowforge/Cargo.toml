@@ -30,7 +30,7 @@ ml-dsa = { version = "=0.1.0-rc.8" }
 aes-gcm = "0.10"
 argon2  = "0.5"
 hmac    = "0.12"
-sha2    = "0.10"
+sha2    = "0.11"
 subtle  = { version = "2.6", default-features = false }
 
 # Error handling
