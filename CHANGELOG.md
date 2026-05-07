@@ -8,6 +8,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.6] — 2026-05-07
+
+### Security
+
+- **Eliminated RUSTSEC-2026-0097 exposure path** — removed the unused `num-bigint`
+  `rand` feature, which eliminated the transitive `rand 0.8.5` dependency from
+  the workspace dependency graph
+
+### Fixed
+
+- **Version alignment** — synchronized repository release marker in `VERSION`
+  with crate versioning (`0.3.6`)
+- **`cargo-deny` advisory config cleanup** — removed stale advisory ignores from
+  `deny.toml` after dependency and advisory state changes; `cargo deny check advisories`
+  now passes cleanly without advisory ignore entries
+
 ## [0.3.5] — 2026-04-22
 
 ### Fixed
