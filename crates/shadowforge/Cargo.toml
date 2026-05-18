@@ -24,7 +24,7 @@ path = "src/lib.rs"
 # Post-Quantum Cryptography — NIST finalists, pure Rust
 # NOTE: RC versions pinned exactly — audit on each bump.
 ml-kem = { version = "=0.3.2" }
-ml-dsa = { version = "=0.1.0-rc.11" }
+ml-dsa = { version = "=0.1.0" }
 
 # Symmetric crypto
 aes-gcm = "0.10"
