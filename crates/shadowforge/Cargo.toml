@@ -84,7 +84,7 @@ lopdf         = { version = "0.40", optional = true }
 pdfium-render = { version = "0.9", features = ["thread_safe"], optional = true }
 
 # ─── Unicode / Text ───────────────────────────────────────────────────────────
-unicode-segmentation  = "1.11"
+unicode-segmentation  = "1.13"
 unicode-normalization = "0.1"
 
 # ─── Archives ─────────────────────────────────────────────────────────────────
