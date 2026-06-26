@@ -2,6 +2,16 @@
 members  = ["crates/*"]
 resolver = "2"
 
+# ─── Patches ──────────────────────────────────────────────────────────────────
+# Fix upstream bug in pdfium-render 0.9.2 (src/pdf/font/provider.rs:275):
+# `c_char` is unsigned on aarch64-linux-gnu (and PPC, RISC-V, s390x), so the
+# `as *const i8` cast mismatches the `*mut c_char` buffer and fails to compile
+# with E0308. Patched on master in
+# https://github.com/ajrcarey/pdfium-render/commit/095024c9a448abecfd4926d48a45be5868eacf20
+# (Jun 21, 2026) but not yet released. Drop this entry when 0.9.3 ships.
+[patch.crates-io]
+pdfium-render = { git = "https://github.com/ajrcarey/pdfium-render", rev = "095024c9a448abecfd4926d48a45be5868eacf20" }
+
 # ─── Workspace-wide profiles ──────────────────────────────────────────────────
 
 [profile.release]
