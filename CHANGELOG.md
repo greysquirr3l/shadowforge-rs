@@ -8,6 +8,17 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
+  open alerts were the same false-positive pattern (test fixtures like
+  `let key = vec![0u8; 32];` or zero-initialised buffers immediately
+  overwritten by RNG/SHA256). Configured via
+  `.github/codeql/codeql-config.yml` and dismissed as `false positive`.
+  See the config file for the rationale and the alternative controls
+  (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
+  that still cover any real hard-coded-key regression.
+
 ## [0.3.7] — 2026-06-26
 
 ### Security
