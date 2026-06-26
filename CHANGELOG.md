@@ -8,6 +8,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Eliminated RUSTSEC-2026-0187 exposure** — bumped `lopdf` from `0.41` to
+  `0.42`. The 0.41 line parses PDF arrays and dictionaries with unbounded
+  recursion; a crafted ~21 KB PDF with ~10,380-deep nested arrays aborts the
+  process via SIGABRT (uncatchable with `catch_unwind`), enabling trivial
+  DoS against any service parsing untrusted PDFs. Fixed upstream in 0.42.0.
+
+### Fixed
+
+- **Build break on `main`** — migrated `domain/crypto/mod.rs` from the
+  `ml-dsa 0.1.0-rc.8` API surface (`KeyGen` trait, `MlDsa87::key_gen` /
+  `from_seed` static methods) to the `ml-dsa 0.1.1` surface
+  (`SigningKey::<P>::from_seed`, explicit seed-fill via `rand::RngExt::fill`
+  for keygen). The source had drifted from the pinned crate version, so a
+  fresh `cargo check` failed — which in turn was blocking every open
+  Dependabot PR.
+- **Missing `hmac::KeyInit` import** — `hmac 0.13` requires the `KeyInit`
+  trait to be in scope for `Hmac::new_from_slice`. Added the import in
+  `domain/correction/mod.rs`.
+- **Clippy `cast_sign_loss` on `i32` page index** — replaced
+  `page_index as usize` with `usize::try_from(page_index).unwrap_or(0)` in
+  `adapters/pdf.rs` (4 sites). Pre-existing warnings that would have failed
+  CI once the build was restored.
+
 ## [0.3.6] — 2026-05-07
 
 ### Security
