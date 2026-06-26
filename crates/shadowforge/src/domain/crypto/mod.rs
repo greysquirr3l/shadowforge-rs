@@ -10,7 +10,7 @@ use argon2::password_hash::SaltString;
 use argon2::{Argon2, Params, PasswordHasher};
 use bytes::{BufMut, Bytes, BytesMut};
 use ml_dsa::{
-    EncodedSignature, EncodedVerifyingKey, KeyGen, MlDsa87, VerifyingKey, signature::Keypair,
+    EncodedSignature, EncodedVerifyingKey, MlDsa87, SigningKey, VerifyingKey, signature::Keypair,
 };
 use ml_kem::{
     Decapsulate, DecapsulationKey1024, Encapsulate as _, EncapsulationKey1024, Kem as _, Key,
@@ -139,12 +139,17 @@ pub fn decapsulate_kem(secret_key: &[u8], ciphertext: &[u8]) -> Result<Bytes, Cr
 /// This function currently always succeeds; the `Result` is kept for API
 /// uniformity with [`generate_kem_keypair`].
 pub fn generate_dsa_keypair(rng: &mut impl CryptoRng) -> Result<KeyPair, CryptoError> {
-    let signing_key = MlDsa87::key_gen(rng);
+    use rand::RngExt as _;
+
+    let mut seed_arr = ml_dsa::B32::default();
+    rng.fill(&mut seed_arr);
+    let signing_key = SigningKey::<MlDsa87>::from_seed(&seed_arr);
     let mut seed = signing_key.to_seed();
     let vk_encoded: EncodedVerifyingKey<MlDsa87> = signing_key.verifying_key().encode();
     let public_key = (vk_encoded.as_ref() as &[u8]).to_vec();
     let secret_key = (seed.as_ref() as &[u8]).to_vec();
     seed.zeroize();
+    seed_arr.zeroize();
     Ok(KeyPair {
         public_key,
         secret_key,
@@ -173,10 +178,10 @@ pub fn sign_dsa(secret_key: &[u8], message: &[u8]) -> Result<Signature, CryptoEr
                 expected: DSA_SEED_LEN,
                 got: secret_key.len(),
             })?;
-    let signing_key = MlDsa87::from_seed(&seed_arr);
+    let signing_key = SigningKey::<MlDsa87>::from_seed(&seed_arr);
     seed_arr.zeroize();
     let ml_sig = signing_key
-        .signing_key()
+        .expanded_key()
         .sign_deterministic(message, b"")
         .map_err(|e| CryptoError::SigningFailed {
             reason: e.to_string(),

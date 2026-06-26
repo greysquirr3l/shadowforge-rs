@@ -137,7 +137,7 @@ impl PdfProcessor for PdfProcessorImpl {
             })?;
 
         let page_count = document.pages().len();
-        let mut images = Vec::with_capacity(page_count as usize);
+        let mut images = Vec::with_capacity(usize::try_from(page_count).unwrap_or(0));
 
         // Render each page
         for page_index in 0..page_count {
@@ -145,7 +145,7 @@ impl PdfProcessor for PdfProcessorImpl {
                 .pages()
                 .get(page_index)
                 .map_err(|e| PdfError::RenderFailed {
-                    page: page_index as usize,
+                    page: usize::try_from(page_index).unwrap_or(0),
                     reason: e.to_string(),
                 })?;
 
@@ -159,7 +159,7 @@ impl PdfProcessor for PdfProcessorImpl {
             let bitmap = page
                 .render_with_config(&PdfRenderConfig::new().set_target_width(target_width))
                 .map_err(|e| PdfError::RenderFailed {
-                    page: page_index as usize,
+                    page: usize::try_from(page_index).unwrap_or(0),
                     reason: e.to_string(),
                 })?;
 
@@ -171,7 +171,7 @@ impl PdfProcessor for PdfProcessorImpl {
             let img =
                 image::RgbaImage::from_raw(width, height, rgba_data.clone()).ok_or_else(|| {
                     PdfError::RenderFailed {
-                        page: page_index as usize,
+                        page: usize::try_from(page_index).unwrap_or(0),
                         reason: "invalid bitmap dimensions".to_string(),
                     }
                 })?;
