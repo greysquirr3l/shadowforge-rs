@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.7] — 2026-06-26
+
 ### Security
 
 - **Eliminated RUSTSEC-2026-0187 exposure** — bumped `lopdf` from `0.41` to
@@ -40,6 +42,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   fix (`as *const c_char`) via `[patch.crates-io]` to commit `095024c`;
   the fix is on master but not yet released. Drop the patch entry when
   `pdfium-render 0.9.3` ships.
+
+### Changed
+
+- `actions/checkout` 4.2.2 → 7.0.0 (#34)
+- `codecov/codecov-action` 6 → 7 (#28)
+- `gitleaks/gitleaks-action` 2 → 3 (#26)
 
 ## [0.3.6] — 2026-05-07
 
@@ -352,7 +360,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Pre-production: external security audit pending (planned for v0.2.0)
 - PDF support requires pdfium system library — see README for installation
 
-[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.6...v0.3.7
+[0.3.6]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.4
 [0.3.3]: https://github.com/greysquirr3l/shadowforge-rs/releases/tag/v0.3.3
