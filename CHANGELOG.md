@@ -32,6 +32,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `page_index as usize` with `usize::try_from(page_index).unwrap_or(0)` in
   `adapters/pdf.rs` (4 sites). Pre-existing warnings that would have failed
   CI once the build was restored.
+- **aarch64-linux-gnu cross-build failure** — `pdfium-render 0.9.2` hardcodes
+  `chars.as_ptr() as *const i8` in `fpdf_sys_font_info_get_face_name`, but
+  `c_char` is `u8` (not `i8`) on aarch64/ARM Linux (also PPC, RISC-V,
+  s390x). The cast mismatches the `*mut c_char` buffer and rustc fails
+  with E0308 under the `cross` tool image. Pinned upstream's one-character
+  fix (`as *const c_char`) via `[patch.crates-io]` to commit `095024c`;
+  the fix is on master but not yet released. Drop the patch entry when
+  `pdfium-render 0.9.3` ships.
 
 ## [0.3.6] — 2026-05-07
 
