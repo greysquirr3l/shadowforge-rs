@@ -3,7 +3,7 @@
 //! All functions are pure — no I/O, no file system, no network.
 
 use bytes::Bytes;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use reed_solomon_erasure::galois_8::ReedSolomon;
 use sha2::Sha256;
 

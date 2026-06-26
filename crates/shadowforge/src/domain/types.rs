@@ -33,6 +33,7 @@ impl Payload {
     /// # Errors
     /// Returns `Err` if `s` is not valid UTF-8 (infallible for `&str`, but
     /// provided for parity with byte-slice callers).
+    #[must_use]
     pub fn from_str_utf8(s: &str) -> Result<Self, std::convert::Infallible> {
         Ok(Self(s.as_bytes().to_vec()))
     }
