@@ -27,7 +27,7 @@ ml-kem = { version = "=0.3.2" }
 ml-dsa = { version = "=0.1.1" }
 
 # Symmetric crypto
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 argon2  = "0.5"
 hmac    = "0.13"
 sha2    = "0.11"
