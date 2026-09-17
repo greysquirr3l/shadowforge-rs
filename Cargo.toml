@@ -12,6 +12,10 @@ resolver = "2"
 [patch.crates-io]
 pdfium-render = { git = "https://github.com/ajrcarey/pdfium-render", rev = "095024c9a448abecfd4926d48a45be5868eacf20" }
 
+# Fix RUSTSEC-2026-0204: invalid pointer dereference in `fmt::Pointer` for
+# `Atomic` and `Shared` when the underlying pointer is invalid.
+crossbeam-epoch = { git = "https://github.com/crossbeam-rs/crossbeam", tag = "epoch-v0.9.20" }
+
 # ─── Workspace-wide profiles ──────────────────────────────────────────────────
 
 [profile.release]
