@@ -6,7 +6,7 @@ use crate::domain::analysis::{
 use crate::domain::errors::AdaptiveError;
 use crate::domain::errors::AnalysisError;
 use crate::domain::ports::CapacityAnalyser;
-use crate::domain::types::{AnalysisReport, Capacity, CoverMedia, StegoTechnique};
+use crate::domain::types::{AnalysisReport, Capacity, CoverMedia, CoverMediaKind, StegoTechnique};
 
 /// Concrete [`CapacityAnalyser`] implementation.
 ///
@@ -45,17 +45,54 @@ impl CapacityAnalyserImpl {
     }
 }
 
+/// The capacity of `cover` for `technique`.
+///
+/// PDF content-stream capacity is measured rather than estimated: it
+/// depends on the numeric operands in the document's page content streams,
+/// and a figure derived from the file size overstates it by orders of
+/// magnitude. The PDF adapter counts those operands, so it is asked
+/// directly.
+fn capacity_for(cover: &CoverMedia, technique: StegoTechnique) -> u64 {
+    #[cfg(feature = "pdf")]
+    if technique == StegoTechnique::PdfContentStream {
+        // Measured from the document itself. If the document cannot be
+        // parsed, fall back to the figure the PDF adapter recorded when it
+        // loaded the file.
+        return crate::adapters::pdf::pdf_content_stream_capacity(cover).map_or_else(
+            |_| {
+                cover
+                    .metadata
+                    .get(crate::domain::analysis::PDF_CONTENT_STREAM_CAPACITY_KEY)
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0)
+            },
+            |capacity| capacity.bytes,
+        );
+    }
+
+    estimate_capacity(cover, technique)
+}
+
 impl CapacityAnalyser for CapacityAnalyserImpl {
     fn analyse(
         &self,
         cover: &CoverMedia,
         technique: StegoTechnique,
     ) -> Result<AnalysisReport, AnalysisError> {
-        let cap_bytes = estimate_capacity(cover, technique);
+        let cap_bytes = capacity_for(cover, technique);
         if cap_bytes == 0 {
-            return Err(AnalysisError::UnsupportedCoverType {
-                reason: format!("{:?} is not compatible with {:?}", cover.kind, technique),
-            });
+            // A PDF whose content streams are too small to hold even the
+            // length prefix is compatible with the technique, just too
+            // small to use it — saying otherwise sends the reader looking
+            // for the wrong problem.
+            let reason = if technique == StegoTechnique::PdfContentStream
+                && cover.kind == CoverMediaKind::PdfDocument
+            {
+                "the document's content streams are too small to hold a payload".to_string()
+            } else {
+                format!("{:?} is not compatible with {:?}", cover.kind, technique)
+            };
+            return Err(AnalysisError::UnsupportedCoverType { reason });
         }
 
         let chi_sq = chi_square_score(&cover.data);
@@ -133,13 +170,87 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// The analysis must report the capacity the technique can actually
+    /// use.
+    ///
+    /// A figure derived from the document's size overstates the real
+    /// capacity by orders of magnitude, so the analyser measures the
+    /// document's content streams instead.
+    #[cfg(feature = "pdf")]
     #[test]
     fn analyse_pdf_content_stream() -> TestResult {
+        use crate::domain::ports::EmbedTechnique;
+
         let analyser = CapacityAnalyserImpl::new();
-        let cover = make_cover(CoverMediaKind::PdfDocument, vec![0u8; 50_000]);
+        let cover = pdf_cover_with_operands(80);
         let report = analyser.analyse(&cover, StegoTechnique::PdfContentStream)?;
-        assert!(report.cover_capacity.bytes > 0);
+        assert!(
+            report.cover_capacity.bytes > 0,
+            "a content stream with operands must report capacity"
+        );
+
+        // The analysis and the technique must agree.
+        let technique_capacity = crate::adapters::pdf::PdfContentStreamStego::new()
+            .capacity(&cover)?
+            .bytes;
+        assert_eq!(
+            report.cover_capacity.bytes, technique_capacity,
+            "the analysis and the technique must report the same capacity"
+        );
         Ok(())
+    }
+
+    /// A PDF cover whose page content stream holds `operands` numbers.
+    #[cfg(feature = "pdf")]
+    fn pdf_cover_with_operands(operands: usize) -> CoverMedia {
+        use lopdf::dictionary;
+        use lopdf::{Document, Object};
+
+        use std::fmt::Write as _;
+
+        let mut content = String::from("S\n");
+        for i in 0..operands {
+            let _ = write!(content, "{i} {} m ", i * 2);
+        }
+
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let leaf_id = doc.new_object_id();
+        let content_id = doc.add_object(lopdf::Stream::new(
+            lopdf::dictionary! {},
+            content.into_bytes(),
+        ));
+        doc.objects.insert(
+            leaf_id,
+            Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Page",
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+                "Contents" => Object::Reference(content_id),
+            }),
+        );
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(lopdf::dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(leaf_id)],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(lopdf::dictionary! {
+            "Type" => "Catalog",
+            "Pages" => Object::Reference(pages_id),
+        });
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let mut bytes = Vec::new();
+        doc.save_to(&mut std::io::BufWriter::new(&mut bytes))
+            .unwrap_or_default();
+
+        CoverMedia {
+            kind: CoverMediaKind::PdfDocument,
+            data: bytes.into(),
+            metadata: HashMap::new(),
+        }
     }
 
     #[test]

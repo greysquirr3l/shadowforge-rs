@@ -225,13 +225,32 @@ fn estimate_text_capacity(cover: &CoverMedia) -> u64 {
     (grapheme_count / 4) as u64
 }
 
+/// Estimate the payload capacity of a PDF cover for content-stream
+/// embedding.
+///
+/// The capacity depends on the numeric operands in the document's page
+/// content streams, which cannot be counted without parsing the document.
+/// The PDF adapter computes it exactly and records it in the cover's
+/// metadata when it loads the file, so this reads that value. A cover that
+/// did not come from the adapter has no such record, and the honest answer
+/// is "unknown" — a guess derived from the file size overstates the real
+/// capacity by orders of magnitude, because a content stream is a small
+/// fraction of a document and only its operands carry bits.
 fn estimate_pdf_content_capacity(cover: &CoverMedia) -> u64 {
     if cover.kind != CoverMediaKind::PdfDocument {
         return 0;
     }
-    // Rough: 1 bit per content-stream byte, ~10% of PDF is content stream
-    (cover.data.len() / 80) as u64
+    cover
+        .metadata
+        .get(PDF_CONTENT_STREAM_CAPACITY_KEY)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
 }
+
+/// Metadata key holding the exact content-stream payload capacity, in bytes.
+///
+/// Set by the PDF adapter when it loads a document.
+pub const PDF_CONTENT_STREAM_CAPACITY_KEY: &str = "content_stream_capacity_bytes";
 
 const fn estimate_pdf_metadata_capacity(_cover: &CoverMedia) -> u64 {
     // Metadata fields: limited capacity (~256 bytes typical)
@@ -590,11 +609,30 @@ mod tests {
         assert_eq!(lsb_cap, corpus_cap);
     }
 
+    /// PDF content-stream capacity is measured, not guessed.
+    ///
+    /// The PDF adapter counts the numeric operands in the document's page
+    /// content streams and records the result on the cover. The domain
+    /// cannot parse a document, so it reports what the adapter measured —
+    /// and nothing at all for a cover it did not measure.
     #[test]
-    fn pdf_content_stream_has_capacity() {
-        let cover = make_cover(CoverMediaKind::PdfDocument, 100_000);
-        let cap = estimate_capacity(&cover, StegoTechnique::PdfContentStream);
-        assert!(cap > 0);
+    fn pdf_content_stream_capacity_comes_from_the_adapter() {
+        let mut cover = make_cover(CoverMediaKind::PdfDocument, 100_000);
+        assert_eq!(
+            estimate_capacity(&cover, StegoTechnique::PdfContentStream),
+            0,
+            "an unmeasured PDF cover has no known content-stream capacity"
+        );
+
+        cover.metadata.insert(
+            PDF_CONTENT_STREAM_CAPACITY_KEY.to_string(),
+            "321".to_string(),
+        );
+        assert_eq!(
+            estimate_capacity(&cover, StegoTechnique::PdfContentStream),
+            321,
+            "the capacity the adapter measured must be reported"
+        );
     }
 
     // ─── Additional capacity estimator coverage ───────────────────────────
