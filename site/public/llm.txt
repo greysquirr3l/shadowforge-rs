@@ -1,0 +1,48 @@
+# shadowforge-rs
+
+Quantum-resistant steganography toolkit for journalists, whistleblowers, and dissidents
+operating against nation-state adversaries.
+
+Repository: https://github.com/greysquirr3l/shadowforge-rs
+Live docs:  https://greysquirr3l.github.io/shadowforge-rs/
+
+shadowforge-rs hides encrypted payloads inside ordinary-looking cover media (images, audio,
+PDFs, text) and layers post-quantum cryptography, forward error correction, and operational
+security countermeasures on top.
+
+## Status
+
+Pre-audit software. No formal cryptographic or security audit has been performed. Use it as
+a supplementary layer alongside established tools (Signal, Tor, Tails), never as a sole
+protection mechanism.
+
+## Documentation map
+
+- Introduction — https://greysquirr3l.github.io/shadowforge-rs/introduction/
+- User Guide
+  - Installation — .../guide/installation/
+  - Quick Start — .../guide/quickstart/
+  - Shell Completions — .../guide/completions/
+- CLI Reference — .../cli/overview/
+  - keygen, embed, extract, embed-distributed, extract-distributed, analyse
+  - Countermeasures: scrub, dead-drop, time-lock, watermark, corpus
+- Threat Model — .../threats/overview/
+  - Automated Steganalysis, Compelled Decryption, Traffic Analysis, Endpoint Compromise,
+    Legal and Jurisdictional Pressure, Stylometric Identification, Residual Risks
+- Operational Security — .../opsec/overview/
+- Architecture — .../architecture/design/
+  - Design Philosophy, Bounded Contexts, Cryptographic Design, Security Policy
+- Contributing — .../contributing/setup/
+  - Development Setup, Testing Standards, Code Style, Release Process
+
+## Technical summary
+
+- Rust 2024 edition, Cargo workspace, single crate under crates/shadowforge
+- Collapsed hexagonal architecture: domain/ (pure, no I/O), adapters/, application/, interface/
+- Post-quantum: ML-KEM-1024 (key encapsulation), ML-DSA-87 (signatures), pure Rust
+- Symmetric: AES-256-GCM, Argon2id KDF
+- Error correction: Reed-Solomon K-of-N erasure coding with HMAC-SHA-256 integrity
+- Steganography: LSB image, DCT JPEG, palette, audio LSB/phase/echo, zero-width text,
+  PDF content-stream, PDF metadata, corpus selection
+- PDF: lopdf for parsing/writing, pdfium-render for page rasterisation
+- Logging: tracing with structured JSON output, RUST_LOG respected

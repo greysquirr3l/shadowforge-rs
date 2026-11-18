@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="shadowforge-rs">
+  <title>shadowforge-rs</title>
+  <rect width="64" height="64" rx="10" fill="#0b0d10"/>
+  <g fill="none" stroke="#e4e4e7" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 20h36"/>
+    <path d="M32 20v13"/>
+    <path d="M22 33h20l-4 12a6 6 0 0 1-12 0z"/>
+  </g>
+  <path d="M32 50v6" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/>
+</svg>

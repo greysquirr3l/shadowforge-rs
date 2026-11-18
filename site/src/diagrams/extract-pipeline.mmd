@@ -1,0 +1,24 @@
+%% shadowforge-rs — extract pipeline.
+%% Conceptual only: the stages and their order, not the parameters of any
+%% individual algorithm.
+flowchart TD
+    GATHER["gather — collect the available covers"]
+    DEC["decapsulate — recover the shared secret"]
+    DECODE["decode — read each embedded payload"]
+    RECON["reconstruct — repair missing shares"]
+    DECRYPT["decrypt — open the payload"]
+    VERIFY["verify — check the signature"]
+    OUT[("recovered payload")]
+
+    COV[("received covers")] --> GATHER
+    GATHER --> DECODE
+    K[("recipient key")] --> DEC
+    DEC --> DECRYPT
+    DECODE --> RECON
+    RECON --> DECRYPT
+    DECRYPT --> VERIFY
+    VERIFY --> OUT
+
+    class DEC key
+    class GATHER,DECODE,RECON,DECRYPT,VERIFY step
+    class COV,K,OUT io

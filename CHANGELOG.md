@@ -8,6 +8,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Documentation moved from mdBook to an Astro + Starlight site** — the
+  mdBook sources under `docs/` were removed and the site now lives in
+  `site/`, as a self-contained project with its own `pnpm` lockfile that
+  `cargo` never sees. Every mdBook page was migrated to MDX, with the
+  architecture diagrams re-authored as Mermaid and rendered to SVG by
+  [Pele](https://pele.run) instead of a browser-side Mermaid runtime.
+  The `make book` / `make book-serve` targets are replaced by
+  `make site-build` / `make site-serve` / `make site-deploy`.
+
+- **The deploy script verifies freshness, not just reachability** — the
+  script now compares the body Pages serves against the local build, so a
+  CDN still serving the previous deploy is no longer reported as a
+  successful deploy. `--no-push` stages the change without committing it,
+  so a preview can no longer leave a commit behind that makes the next
+  real deploy report "nothing to deploy" and exit without pushing. Both
+  defects were found and fixed on `protocol-droid` and are covered by
+  `site/scripts/deploy-docs.test.sh`.
+
+- **CI builds the site on every push and pull request** — the mdBook
+  `docs.yml` workflow is replaced by `site.yml`, which type-checks the
+  Astro components and asserts the built output has the expected shape.
+  The trigger deliberately has no `paths:` filter, so the check reports on
+  every pull request and can be required without blocking merges.
+
 ## [0.4.0] — 2026-11-17
 
 ### Security

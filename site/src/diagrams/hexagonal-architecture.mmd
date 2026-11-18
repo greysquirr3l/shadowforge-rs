@@ -1,0 +1,48 @@
+%% shadowforge-rs — hexagonal architecture.
+%% Dependencies point inward: adapters → ports ← domain. The domain layer
+%% holds no I/O, no async runtime, no filesystem and no network access; every
+%% external interaction goes through a port trait declared in the domain.
+flowchart TD
+    subgraph OUT["Outside the process"]
+        CLI["CLI / interface layer"]
+        FS[("Files, keys, covers")]
+    end
+
+    subgraph IN["Inbound adapters"]
+        AD1["stego adapters"]
+        AD2["media adapters"]
+        AD3["distribution adapters"]
+    end
+
+    subgraph APP["Application layer"]
+        APP1["embed / extract use cases"]
+        APP2["shard and reconstruct"]
+        APP3["key management"]
+    end
+
+    subgraph DOM["Domain layer — pure"]
+        CTX1["crypto context"]
+        CTX2["correction context"]
+        CTX3["stego context"]
+        CTX4["distribution context"]
+        CTX5["adaptive / deniable / opsec contexts"]
+        PORTS["Port traits"]
+    end
+
+    CLI --> APP
+    FS --> AD1
+    FS --> AD2
+    FS --> AD3
+
+    AD1 -->|"implements"| PORTS
+    AD2 -->|"implements"| PORTS
+    AD3 -->|"implements"| PORTS
+
+    APP -->|"calls through"| PORTS
+    APP --> DOM
+
+    class CLI,FS outside
+    class AD1,AD2,AD3 adapter
+    class APP1,APP2,APP3 app
+    class CTX1,CTX2,CTX3,CTX4,CTX5 domain
+    class PORTS ports

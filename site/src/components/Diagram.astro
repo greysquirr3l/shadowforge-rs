@@ -1,0 +1,60 @@
+---
+/**
+ * Inline a Pele-rendered Mermaid diagram.
+ *
+ * The SVGs are imported with `?raw` and `eager: true` so Astro resolves them
+ * at build time. Reading them at runtime would break prerendering, and a
+ * linked `<img>` would lose the `svg.pele` rule that Pele injects — that
+ * rule is what carries the CSS-variable theming, so the diagram has to be
+ * inline markup rather than an external file.
+ */
+const diagrams = import.meta.glob<string>('../diagrams/generated/*.svg', {
+	query: '?raw',
+	import: 'default',
+	eager: true,
+});
+
+interface Props {
+	/** Basename of the diagram, without the `.svg` suffix. */
+	name: string;
+	/** Accessible name for the diagram. */
+	alt: string;
+}
+
+const { name, alt } = Astro.props;
+
+const svg = diagrams[`../diagrams/generated/${name}.svg`];
+if (!svg) {
+	throw new Error(`diagram not found: ${name}.svg`);
+}
+---
+
+<figure class="sf-diagram" role="group" aria-label={alt}>
+	<div set:html={svg} />
+	<figcaption><slot /></figcaption>
+</figure>
+
+<style>
+	.sf-diagram {
+		margin: 2rem 0;
+		padding: 1.5rem;
+		border: 1px solid var(--sl-color-hairline);
+		border-radius: 6px;
+		background: var(--sl-color-bg-nav);
+		overflow-x: auto;
+	}
+
+	.sf-diagram :global(svg) {
+		display: block;
+		margin: 0 auto;
+		max-width: 100%;
+		height: auto;
+	}
+
+	.sf-diagram figcaption {
+		margin-top: 1rem;
+		color: var(--sl-color-text-muted);
+		font-size: 0.85rem;
+		text-align: center;
+	}
+</style>

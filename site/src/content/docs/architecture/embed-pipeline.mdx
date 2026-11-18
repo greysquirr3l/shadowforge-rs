@@ -1,0 +1,61 @@
+---
+title: "Embed Pipeline"
+description: "The stages shadowforge-rs runs when embedding a payload, from key generation to distribution."
+---
+
+import Diagram from '../../../components/Diagram.astro';
+
+Embedding a payload is a fixed sequence of stages. Each one narrows the options for an adversary
+who later finds the cover: the payload is sealed before it is hidden, and hidden before it is
+split.
+
+<Diagram name="embed-pipeline" alt="Embed pipeline: key generation, key encapsulation, payload encryption, sharding, embedding into a cover, optional profile hardening, and distribution.">
+The stages and their order. Parameters belong to the individual algorithms, not to the pipeline.
+</Diagram>
+
+## The stages
+
+| Stage | What happens | Where |
+|-------|--------------|-------|
+| **keygen** | Generate an ML-KEM-1024 key pair for the recipient | `domain/crypto` |
+| **encapsulate** | Derive a shared secret against the recipient's public key | `domain/crypto` |
+| **encrypt** | Seal the payload with AES-256-GCM under an Argon2id-derived key | `domain/crypto` |
+| **shard** | Split the ciphertext into Reed-Solomon K-of-N shares with HMAC tags | `domain/correction` |
+| **embed** | Write each share into a cover with the selected technique | `domain/stego` |
+| **harden** | Apply the embedding profile — adaptive, compression-survivable, or corpus-based | `domain/adaptive` |
+| **distribute** | Place the resulting covers according to the distribution pattern | `domain/distribution` |
+
+## Encryption comes before embedding
+
+The payload is encrypted *before* it is written into the cover. This ordering matters for two
+reasons:
+
+- A cover that is intercepted without the recipient's key reveals nothing, even to an adversary
+  who can read the stego image directly.
+- Every technique then carries the same opaque ciphertext, so a steganographic detector cannot
+  distinguish one technique from another by payload statistics.
+
+## Sharding comes before embedding
+
+Each share is embedded into a different cover. This is what turns a single confiscated carrier
+from a total loss into a survivable one: the recipient needs any K of the N shares to
+reconstruct the payload, and a share whose HMAC tag fails verification is discarded rather than
+corrupting the reconstruction.
+
+## Hardening is optional
+
+The embedding profile decides how hard the carrier is to analyse and how far it survives
+transmission:
+
+- **Standard** — no extra work. Fastest.
+- **Adaptive** — optimise the embedding against steganalysis and match the cover's camera profile.
+- **Compression-survivable** — calibrate against a specific platform's recompression pipeline.
+- **Corpus-based** — select a cover that needs no modification at all.
+
+See [Embedding Profiles](../cli/embed-distributed/) for the flags that select each one.
+
+## What happens next
+
+The covers are written to disk (unless [amnesiac mode](../opsec/overview/) is enabled), and the
+recipient needs the key material plus enough of the covers to meet the K-of-N threshold. See
+[Extract Pipeline](./extract-pipeline/) for that side.

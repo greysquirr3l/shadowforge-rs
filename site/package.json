@@ -1,0 +1,33 @@
+{
+  "name": "shadowforge-rs-site",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "description": "Documentation site for shadowforge-rs, deployed to greysquirr3l.github.io",
+  "scripts": {
+    "diagrams": "node scripts/render-diagrams.mjs",
+    "dev": "pnpm run diagrams && astro dev",
+    "start": "pnpm run diagrams && astro dev",
+    "build": "pnpm run diagrams && astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "deploy": "bash scripts/deploy-docs.sh",
+    "deploy:dry": "bash scripts/deploy-docs.sh --no-push"
+  },
+  "deploy-docs": {
+    "pagesRepo": "../../../greysquirr3l.github.io",
+    "subdir": "shadowforge-rs",
+    "liveUrl": "https://greysquirr3l.github.io/shadowforge-rs/",
+    "sourceRepo": "greysquirr3l/shadowforge-rs"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.43.1",
+    "astro": "^7.4.12",
+    "pele": "^1.13.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "typescript": "^5.7.0"
+  }
+}

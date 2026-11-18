@@ -1,0 +1,441 @@
+/* shadowforge-rs documentation theme.
+ *
+ * Industrial and monochrome: charcoal surfaces, a single amber signal colour
+ * reserved for warnings, and a monospace accent for machine-facing text
+ * (commands, file paths, identifiers). The accent is charcoal `#1f2937` in
+ * light mode and a lifted slate in dark mode so it stays legible against
+ * the dark chrome.
+ *
+ * Everything below overrides Starlight's own tokens — Starlight reads this
+ * file at the bottom of the cascade, so no Starlight rule is restated here.
+ */
+
+/* ─── Fonts ───────────────────────────────────────────────────────────────── */
+
+:root {
+	--sl-font:
+		'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--sl-font-mono:
+		'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+}
+
+/* ─── Charcoal accent ─────────────────────────────────────────────────────── */
+
+:root {
+	--sl-color-accent-low: #e5e7eb;
+	--sl-color-accent: #1f2937;
+	--sl-color-accent-high: #111827;
+}
+
+:root[data-theme='dark'] {
+	--sl-color-accent-low: #1e293b;
+	--sl-color-accent: #cbd5e1;
+	--sl-color-accent-high: #f1f5f9;
+}
+
+/* ─── Surfaces ────────────────────────────────────────────────────────────── */
+
+:root {
+	--sl-color-bg: #fafafa;
+	--sl-color-bg-nav: #f4f4f5;
+	--sl-color-bg-sidebar: #fafafa;
+	--sl-color-bg-inline-code: #f4f4f5;
+	--sl-color-hairline: #e4e4e7;
+	--sl-color-hairline-light: #ededed;
+	--sl-color-hairline-shade: #d4d4d8;
+	--sl-color-text: #18181b;
+	--sl-color-text-accent: #1f2937;
+	--sl-color-text-muted: #52525b;
+}
+
+:root[data-theme='dark'] {
+	--sl-color-bg: #0b0d10;
+	--sl-color-bg-nav: #0e1116;
+	--sl-color-bg-sidebar: #0b0d10;
+	--sl-color-bg-inline-code: #171a20;
+	--sl-color-hairline: #23272f;
+	--sl-color-hairline-light: #1a1e25;
+	--sl-color-hairline-shade: #313742;
+	--sl-color-text: #e4e4e7;
+	--sl-color-text-accent: #e2e8f0;
+	--sl-color-text-muted: #9ca3af;
+}
+
+/* ─── Signal amber ────────────────────────────────────────────────────────── */
+/* Reserved for warnings and cautions. Used by Starlight's `caution` and
+ * `danger` asides, which is exactly where a reader needs to slow down. */
+
+:root {
+	--sf-signal: #b45309;
+	--sf-signal-soft: #fef3c7;
+	--sf-signal-line: #f59e0b;
+}
+
+:root[data-theme='dark'] {
+	--sf-signal: #fbbf24;
+	--sf-signal-soft: #2a1f08;
+	--sf-signal-line: #d97706;
+}
+
+/* ─── Pele diagram variables ──────────────────────────────────────────────── */
+/* Pele emits `var(--pele-*, fallback)` for every colour it uses, so the
+ * diagrams follow the theme without a second render. */
+
+:root {
+	--pele-bg: transparent;
+	--pele-fg: #27272a;
+	--pele-muted: #71717a;
+	--pele-line: #a1a1aa;
+	--pele-surface: #f4f4f5;
+	--pele-surface-alt: #e4e4e7;
+	--pele-border: #d4d4d8;
+	--pele-accent: #1f2937;
+	--pele-font: var(--sl-font);
+	--pele-font-mono: var(--sl-font-mono);
+	--pele-radius: 3px;
+}
+
+:root[data-theme='dark'] {
+	--pele-fg: #e4e4e7;
+	--pele-muted: #9ca3af;
+	--pele-line: #52525b;
+	--pele-surface: #171a20;
+	--pele-surface-alt: #23272f;
+	--pele-border: #313742;
+	--pele-accent: #cbd5e1;
+}
+
+/* ─── Typography ──────────────────────────────────────────────────────────── */
+
+:root {
+	--sl-text-h1: 2rem;
+	--sl-text-h2: 1.5rem;
+	--sl-text-h3: 1.25rem;
+	--sl-text-h4: 1.05rem;
+	--sl-text-code: 0.85em;
+}
+
+.sl-markdown-content h2 {
+	border-bottom-color: var(--sl-color-hairline);
+	padding-bottom: 0.3em;
+}
+
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+	letter-spacing: -0.01em;
+}
+
+/* ─── Landing page ────────────────────────────────────────────────────────── */
+
+/* The landing page is a full-bleed document: the hero and the feature
+ * sections manage their own width, so the markdown container's padding and
+ * max-width are neutralised for that page only. The page's own H1 is
+ * hidden because the hero carries the title. */
+.sl-markdown-content:has(> .sf-hero) {
+	padding: 0;
+	max-width: none;
+}
+
+.sl-markdown-content:has(> .sf-hero) > h1:first-child {
+	display: none;
+}
+
+.sf-hero {
+	position: relative;
+	overflow: hidden;
+	border-bottom: 1px solid var(--sl-color-hairline);
+	background:
+		radial-gradient(
+			120% 90% at 12% 0%,
+			color-mix(in srgb, var(--sl-color-accent) 12%, transparent),
+			transparent 62%
+		),
+		linear-gradient(180deg, var(--sl-color-bg) 0%, var(--sl-color-bg-nav) 100%);
+}
+
+.sf-hero__inner {
+	max-width: 52rem;
+	margin: 0 auto;
+	padding: 4.5rem 1.5rem 4rem;
+}
+
+.sf-hero__eyebrow {
+	display: inline-block;
+	margin-bottom: 1.25rem;
+	padding: 0.2rem 0.6rem;
+	border: 1px solid var(--sl-color-hairline);
+	border-radius: 3px;
+	background: var(--sl-color-bg-inline-code);
+	color: var(--sl-color-text-muted);
+	font-family: var(--sl-font-mono);
+	font-size: 0.75rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.sf-hero h1 {
+	margin: 0 0 0.75rem;
+	font-size: clamp(2.1rem, 5vw, 3rem);
+	font-weight: 700;
+	letter-spacing: -0.03em;
+	line-height: 1.1;
+}
+
+.sf-hero__tagline {
+	margin: 0 0 1.25rem;
+	max-width: 42rem;
+	color: var(--sl-color-text);
+	font-size: 1.15rem;
+	line-height: 1.6;
+}
+
+.sf-hero__positioning {
+	margin: 0 0 2rem;
+	max-width: 42rem;
+	color: var(--sl-color-text-muted);
+	font-size: 1rem;
+	line-height: 1.65;
+}
+
+.sf-hero__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+}
+
+.sf-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.55rem 1.1rem;
+	border: 1px solid var(--sl-color-accent);
+	border-radius: 4px;
+	background: var(--sl-color-accent);
+	color: var(--sl-color-bg);
+	font-size: 0.95rem;
+	font-weight: 600;
+	text-decoration: none;
+	transition: opacity 120ms ease-out;
+}
+
+.sf-button:hover {
+	opacity: 0.86;
+	text-decoration: none;
+}
+
+.sf-button--ghost {
+	background: transparent;
+	color: var(--sl-color-text-accent);
+}
+
+.sf-section {
+	max-width: 60rem;
+	margin: 0 auto;
+	padding: 3rem 1.5rem;
+}
+
+.sf-section__title {
+	margin: 0 0 0.4rem;
+	font-size: 1.35rem;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+}
+
+.sf-section__lede {
+	margin: 0 0 1.75rem;
+	color: var(--sl-color-text-muted);
+}
+
+.sf-grid {
+	display: grid;
+	gap: 1rem;
+	grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.sf-card {
+	display: block;
+	padding: 1.1rem 1.2rem;
+	border: 1px solid var(--sl-color-hairline);
+	border-radius: 6px;
+	background: var(--sl-color-bg);
+	color: inherit;
+	text-decoration: none;
+	transition: border-color 120ms ease-out;
+}
+
+.sf-card:hover {
+	border-color: var(--sl-color-accent);
+	text-decoration: none;
+}
+
+.sf-card__title {
+	margin: 0 0 0.35rem;
+	color: var(--sl-color-text-accent);
+	font-size: 1rem;
+	font-weight: 620;
+}
+
+.sf-card__body {
+	margin: 0;
+	color: var(--sl-color-text-muted);
+	font-size: 0.9rem;
+	line-height: 1.55;
+}
+
+.sf-card__meta {
+	margin: 0.6rem 0 0;
+	color: var(--sl-color-text-muted);
+	font-family: var(--sl-font-mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.02em;
+}
+
+/* ─── Diagrams ────────────────────────────────────────────────────────────── */
+
+/* Diagram node roles.
+ *
+ * The Mermaid sources assign each node a class (`key`, `step`, `io`, and so
+ * on) but deliberately set no colours: Mermaid's `classDef` fixes a literal
+ * colour that cannot follow the theme. The classes are emitted onto the
+ * rendered SVG, so the palette is applied here instead — once, for both
+ * themes, with no second render.
+ *
+ * Each role pairs an explicit fill with an explicit foreground rather than
+ * deriving one from the other, so a role stays legible if a fill is ever
+ * changed. */
+.sf-diagram {
+	--sf-diagram-key-fill: #1f2937;
+	--sf-diagram-key-stroke: #111827;
+	--sf-diagram-key-fg: #fafafa;
+	--sf-diagram-step-fill: #e4e4e7;
+	--sf-diagram-step-stroke: #71717a;
+	--sf-diagram-step-fg: #18181b;
+	--sf-diagram-io-fill: #f4f4f5;
+	--sf-diagram-io-stroke: #a1a1aa;
+	--sf-diagram-io-fg: #27272a;
+	--sf-diagram-ports-fill: #e7e5e4;
+	--sf-diagram-ports-stroke: #78716c;
+	--sf-diagram-ports-fg: #1c1917;
+}
+
+:root[data-theme='dark'] .sf-diagram {
+	--sf-diagram-key-fill: #334155;
+	--sf-diagram-key-stroke: #64748b;
+	--sf-diagram-key-fg: #e2e8f0;
+	--sf-diagram-step-fill: #23272f;
+	--sf-diagram-step-stroke: #52525b;
+	--sf-diagram-step-fg: #e4e4e7;
+	--sf-diagram-io-fill: #171a20;
+	--sf-diagram-io-stroke: #3f4653;
+	--sf-diagram-io-fg: #d4d4d8;
+	--sf-diagram-ports-fill: #26211c;
+	--sf-diagram-ports-stroke: #57534e;
+	--sf-diagram-ports-fg: #e7e5e4;
+}
+
+.sf-diagram .pele-node rect,
+.sf-diagram .pele-node ellipse,
+.sf-diagram .pele-node polygon {
+	fill: var(--sf-diagram-step-fill);
+	stroke: var(--sf-diagram-step-stroke);
+}
+
+.sf-diagram .pele-node .pele-label {
+	fill: var(--sf-diagram-step-fg);
+}
+
+.sf-diagram .pele-node.key rect,
+.sf-diagram .pele-node.key ellipse,
+.sf-diagram .pele-node.key polygon,
+.sf-diagram .pele-node.domain rect,
+.sf-diagram .pele-node.domain ellipse,
+.sf-diagram .pele-node.domain polygon {
+	fill: var(--sf-diagram-key-fill);
+	stroke: var(--sf-diagram-key-stroke);
+}
+
+.sf-diagram .pele-node.key .pele-label,
+.sf-diagram .pele-node.domain .pele-label {
+	fill: var(--sf-diagram-key-fg);
+}
+
+.sf-diagram .pele-node.io rect,
+.sf-diagram .pele-node.io ellipse,
+.sf-diagram .pele-node.io polygon,
+.sf-diagram .pele-node.outside rect,
+.sf-diagram .pele-node.outside ellipse,
+.sf-diagram .pele-node.outside polygon,
+.sf-diagram .pele-node.adapter rect,
+.sf-diagram .pele-node.adapter ellipse,
+.sf-diagram .pele-node.adapter polygon,
+.sf-diagram .pele-node.app rect,
+.sf-diagram .pele-node.app ellipse,
+.sf-diagram .pele-node.app polygon {
+	fill: var(--sf-diagram-io-fill);
+	stroke: var(--sf-diagram-io-stroke);
+}
+
+.sf-diagram .pele-node.io .pele-label,
+.sf-diagram .pele-node.outside .pele-label,
+.sf-diagram .pele-node.adapter .pele-label,
+.sf-diagram .pele-node.app .pele-label {
+	fill: var(--sf-diagram-io-fg);
+}
+
+.sf-diagram .pele-node.ports rect,
+.sf-diagram .pele-node.ports ellipse,
+.sf-diagram .pele-node.ports polygon {
+	fill: var(--sf-diagram-ports-fill);
+	stroke: var(--sf-diagram-ports-stroke);
+}
+
+.sf-diagram .pele-node.ports .pele-label {
+	fill: var(--sf-diagram-ports-fg);
+}
+
+/* ─── Header wordmark ─────────────────────────────────────────────────────── */
+
+.sf-wordmark {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.sf-wordmark__mark {
+	height: calc(var(--sl-nav-height) - 2 * var(--sl-nav-pad-y));
+	width: auto;
+}
+
+/* ─── Table styling ───────────────────────────────────────────────────────── */
+
+.sl-markdown-content table {
+	font-size: 0.92rem;
+}
+
+.sl-markdown-content th {
+	background: var(--sl-color-bg-nav);
+	font-weight: 620;
+	letter-spacing: 0.01em;
+}
+
+/* ─── Asides ──────────────────────────────────────────────────────────────── */
+
+.starlight-aside {
+	border-radius: 4px;
+}
+
+.starlight-aside--caution {
+	border-color: var(--sf-signal-line);
+}
+
+.starlight-aside--caution .starlight-aside__title {
+	color: var(--sf-signal);
+}
+
+.starlight-aside--danger {
+	border-color: #b91c1c;
+}
+
+:root[data-theme='dark'] .starlight-aside--danger {
+	border-color: #ef4444;
+}
