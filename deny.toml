@@ -24,8 +24,27 @@ ignore       = [
     # removed without dropping PDF support. Its own use is limited to
     # timestamp formatting for manifests and time-lock puzzles.
     { id = "RUSTSEC-2026-0543" },
+    # RUSTSEC-2026-0253: `lru` 0.7.8 has a use-after-free in
+    # `LruCache::pop()`, which is not panic-safe — a panicking `Drop` on a
+    # cached key leaves the node linked in the LRU list. The fix is in
+    # `lru` 0.18.2, which `reed-solomon-erasure` 6.0 does not accept: it
+    # pins `lru = "0.7.8"`, and 0.18 is a breaking API change.
+    #
+    # The advisory is not reachable here. `reed-solomon-erasure` uses the
+    # cache only through `put` and `get`; it never calls `pop()`, which is
+    # the method the advisory describes. The unsound path cannot be
+    # reached through our dependency graph.
+    { id = "RUSTSEC-2026-0253" },
 ]
 unmaintained = "workspace"
+# `unsound` advisories are denied by default, but `deny.toml` did not say so
+# explicitly and the default did not apply: cargo-deny reported the lockfile
+# as clean while `cargo audit` flagged the same advisory as unsound. The two
+# tools disagreed about the same lockfile, which is how an unreviewed advisory
+# reaches a release unnoticed. Saying it explicitly makes the policy visible
+# in the file, and it makes the waiver above load-bearing: if `lru` ever
+# starts calling `pop()`, this stops being a waiver and becomes a bug.
+unsound = "all"
 
 # ─── Licenses ─────────────────────────────────────────────────────────────────
 [licenses]
