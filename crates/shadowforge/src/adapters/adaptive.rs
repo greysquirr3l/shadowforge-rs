@@ -780,6 +780,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     fn make_cover(kind: CoverMediaKind, w: u32, h: u32) -> CoverMedia {
         let n = (w as usize).saturating_mul(h as usize).saturating_mul(4);
         let mut meta = HashMap::new();
@@ -1019,7 +1021,7 @@ mod tests {
     /// simulation would not survive the real platform's compression, which
     /// is exactly what this simulator exists to guarantee.
     #[test]
-    fn compression_simulator_preserves_cover_colours() {
+    fn compression_simulator_preserves_cover_colours() -> TestResult {
         let sim = CompressionSimulatorImpl;
         let (w, h) = (32u32, 32u32);
 
@@ -1042,10 +1044,7 @@ mod tests {
             metadata: meta,
         };
 
-        let result = sim.simulate(cover, &PlatformProfile::Telegram);
-        let Ok(result) = result else {
-            panic!("simulate failed");
-        };
+        let result = sim.simulate(cover, &PlatformProfile::Telegram)?;
         assert_eq!(result.kind, CoverMediaKind::JpegImage);
 
         // Cover media carries raw RGBA8 samples.
@@ -1054,9 +1053,8 @@ mod tests {
             (w as usize) * (h as usize) * 4,
             "simulated cover must carry RGBA8 samples"
         );
-        let Some(decoded) = image::RgbaImage::from_raw(w, h, result.data.to_vec()) else {
-            panic!("simulated cover must be a valid RGBA8 image");
-        };
+        let decoded = image::RgbaImage::from_raw(w, h, result.data.to_vec())
+            .ok_or("simulated cover must be a valid RGBA8 image")?;
 
         for (x, y, pixel) in decoded.enumerate_pixels() {
             let source = expected.get_pixel(x, y).0;
@@ -1070,6 +1068,7 @@ mod tests {
                 source
             );
         }
+        Ok(())
     }
 
     #[test]

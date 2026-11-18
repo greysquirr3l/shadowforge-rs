@@ -8,6 +8,104 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-17
+
+### Security
+
+- **Encrypted PDFs are rejected instead of silently unprotected** — the
+  check consulted `is_encrypted()`, but lopdf decrypts a document whose
+  user password is empty as it loads and then drops the `/Encrypt` entry
+  from the trailer, so the flag was already false by the time the code
+  looked. A document that was encrypted was reported as unprotected,
+  accepted for embedding, and written back without its protection.
+  `load_pdf` now consults `was_encrypted()` as well, and refuses
+  encrypted documents outright.
+
+- **Path traversal via ZIP entry names** — `unpack_zip` took the raw
+  entry name and the CLI wrote it to `output_dir.join(name)`, so a crafted
+  archive containing an entry named `../../etc/passwd` wrote outside the
+  directory the user chose. Entry names are now resolved through
+  `enclosed_name()`, falling back to `mangled_name()`, which cannot
+  resolve above the output directory. Covered by a new test.
+
+### Fixed
+
+- **Rebuilt PDFs pointed at the wrong objects** — the page dictionary and
+  its content stream were addressed by guessing object IDs as offsets
+  from the page's own ID. lopdf allocates IDs on insertion, so the
+  guesses landed on unrelated objects: a page's `/Contents` pointed at the
+  page dictionary, and the image XObject pointed at the content stream.
+  The rebuilt document is now structurally valid.
+
+- **Rebuilt PDFs declared the wrong stream filter** — the image XObject
+  was declared `FlateDecode` but held PNG bytes, so a renderer decoded
+  the data as zlib and produced a blank page. The image is now stored as
+  a `DCTDecode` JPEG XObject, which is what it always was.
+
+- **The second pdfium render in a process always failed** — pdfium keeps
+  its bindings in a global `OnceCell`, so it can only be bound once per
+  process. A second bind attempt returned
+  `PdfiumLibraryBindingsAlreadyInitialized`, which the code treated as
+  fatal, so any workflow that rendered pages twice — the render pipeline
+  followed by a cover rebuild — failed at the second call. The bound
+  library is now cached and shared.
+
+- **PDF content-stream capacity bore no relation to what could be
+  embedded** — the reported figure came from a heuristic that divided the
+  file size by 80, while the embedder stores one bit in the least
+  significant bit of each *numeric operand* of a page's content stream.
+  The two disagreed by orders of magnitude: `analyse` reported 573 bytes
+  for a document that could hold 2. Capacity is now measured from the
+  document's own content streams, and `analyse`, `capacity()` and
+  `embed` all report the same figure.
+
+- **Extracting a content-stream payload returned trailing garbage** —
+  the payload carried no length prefix, so the reader could not tell
+  where it ended and kept consuming the document's own operands: a
+  five-byte message came back as ten bytes, the second five being
+  fragments of the page's coordinates. The payload is now framed with a
+  32-bit big-endian length, matching the header the image and audio
+  techniques already use.
+
+- **Content-stream embedding corrupted the document's images** — the
+  embedder wrote into every stream in the file, including the
+  FlateDecode-compressed image XObjects. A bit written into compressed
+  data changes the bytes the decoder sees, which shows up as a visibly
+  broken page. Embedding and extraction are now confined to the page's
+  content streams.
+
+- **Compression-survivable covers failed outright** — the compression
+  simulator read RGBA cover data as RGB and returned RGB, which shifted
+  every channel and left the buffer a quarter too short for every
+  downstream reader. `embed-distributed --profile survivable` failed with
+  an image-dimension error. The simulator now converts to RGB properly
+  and returns RGBA, matching the `CoverMedia` convention.
+
+- **`cargo deny` now passes** — the dependency refresh resolved 20+ outstanding
+  advisories (including the `zip` extraction symlink and `flate2`
+  decompression advisories, and the `crossbeam-epoch` pointer-dereference
+  issue) along with three yanked crates. The remaining `chrono`
+  unmaintained advisory (RUSTSEC-2026-0543) is explicitly ignored with a
+  rationale: it has no fixed release and arrives transitively through
+  `lopdf` and `pdfium-render`, so it cannot be removed without dropping PDF
+  support.
+
+- **Argon2id key derivation migrated to `hash_password_into`** — argon2 0.6
+  removed the `hash_password`/`SaltString` API. The replacement takes the
+  raw salt bytes directly instead of round-tripping them through base64.
+  Derived keys are byte-identical to the previous implementation, so
+  existing payloads remain decryptable.
+
+- **AES-256-GCM key and nonce construction moved to `TryFrom`** — aes-gcm
+  0.11 deprecated `Array::from_slice`. Length mismatches now surface as
+  the existing `InvalidKeyLength` / `InvalidNonceLength` errors instead of
+  panicking.
+
+- **New clippy lints from the 1.98 toolchain** — `chunks_exact` with a
+  constant chunk size (now `as_chunks`), `suboptimal_flops` (now
+  `mul_add`), and a missing `#[must_use]` are all fixed rather than
+  suppressed, keeping `cargo clippy -- -D warnings` green.
+
 ### Changed
 
 - **Workspace switches to `resolver = "3"`** — Cargo's MSRV-aware
@@ -53,39 +151,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
   that still cover any real hard-coded-key regression.
 
-### Fixed
+### Testing
 
-- **Path traversal via ZIP entry names** — `unpack_zip` took the raw
-  entry name and the CLI wrote it to `output_dir.join(name)`, so a crafted
-  archive containing an entry named `../../etc/passwd` wrote outside the
-  directory the user chose. Entry names are now resolved through
-  `enclosed_name()`, falling back to `mangled_name()`, which cannot
-  resolve above the output directory. Covered by a new test.
+- **The three ignored PDF tests are enabled** — they were marked
+  `#[ignore]` with a note that the behaviour was unimplemented, but they
+  were in fact exposing the defects above. All three pass.
 
-- **`cargo deny` now passes** — the dependency refresh resolved 20+ outstanding
-  advisories (including the `zip` extraction symlink and `flate2`
-  decompression advisories, and the `crossbeam-epoch` pointer-dereference
-  issue) along with three yanked crates. The remaining `chrono`
-  unmaintained advisory (RUSTSEC-2026-0543) is explicitly ignored with a
-  rationale: it has no fixed release and arrives transitively through
-  `lopdf` and `pdfium-render`, so it cannot be removed without dropping PDF
-  support.
+- **CI requires pdfium** — the PDF tests skip themselves when the pdfium
+  shared library is absent, which meant a broken pdfium binding could
+  hide behind a skip. The CI workflow now sets `SHADOWFORGE_REQUIRE_PDFIUM`,
+  which turns the skip into a failure where pdfium is installed.
 
-- **Argon2id key derivation migrated to `hash_password_into`** — argon2 0.6
-  removed the `hash_password`/`SaltString` API. The replacement takes the
-  raw salt bytes directly instead of round-tripping them through base64.
-  Derived keys are byte-identical to the previous implementation, so
-  existing payloads remain decryptable.
-
-- **AES-256-GCM key and nonce construction moved to `TryFrom`** — aes-gcm
-  0.11 deprecated `Array::from_slice`. Length mismatches now surface as the
-  existing `InvalidKeyLength` / `InvalidNonceLength` errors instead of
-  panicking.
-
-- **New clippy lints from the 1.98 toolchain** — `chunks_exact` with a
-  constant chunk size (now `as_chunks`), `suboptimal_flops` (now
-  `mul_add`), and a missing `#[must_use]` are all fixed rather than
-  suppressed, keeping `cargo clippy -- -D warnings` green.
+- **The release workflow verifies the version before publishing** — the
+  tag, the crate version, the `VERSION` file and the changelog are
+  checked against each other before anything is built, so a mismatched
+  release can no longer reach crates.io.
 
 ## [0.3.7] — 2026-06-26
 
@@ -493,7 +573,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Pre-production: external security audit pending (planned for v0.2.0)
 - PDF support requires pdfium system library — see README for installation
 
-[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.7...v0.4.0
 [0.3.7]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/greysquirr3l/shadowforge-rs/compare/v0.3.4...v0.3.5

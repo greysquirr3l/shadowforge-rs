@@ -63,3 +63,4 @@
 - [Development Setup](./contributing/setup.md)
 - [Testing Standards](./contributing/testing.md)
 - [Code Style](./contributing/style.md)
+- [Release Process](./contributing/release.md)

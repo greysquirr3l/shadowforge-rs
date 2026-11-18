@@ -17,6 +17,31 @@ If you are a journalist or whistleblower in immediate danger:
 
 ---
 
+## Supported Versions
+
+| Version | Security fixes | Notes |
+|---------|----------------|-------|
+| 0.4.x   | Yes            | Current release |
+| 0.3.x   | No             | Upgrade for the fixes below |
+| < 0.3   | No             | Not maintained |
+
+Two defects in 0.3.x affect the confidentiality of the data you handle and
+are fixed only in 0.4.0:
+
+- **Encrypted PDFs lost their protection.** A PDF protected by an empty user
+  password was reported as unprotected, accepted for embedding, and written
+  back without its encryption. If you embedded a message into an encrypted
+  document with 0.3.x, treat that document's confidentiality as compromised
+  and re-encrypt it.
+- **Archive extraction could write outside the target directory.** A crafted
+  archive containing an entry named `../../etc/passwd` could write outside
+  the directory you chose when unpacking. Archive handling in 0.4.0 confines
+  every entry to the output directory.
+
+Users of 0.3.x should upgrade rather than plan a backport.
+
+---
+
 ## Cryptographic Standards
 
 | Component | Algorithm | Standard |
@@ -53,6 +78,30 @@ All key material is zeroized on drop (`zeroize` crate).
 5. **Corpus steganography** does not prevent an adversary from proving that a
    specific image was deliberately chosen if they have access to the full
    corpus and the payload's bit pattern.
+
+6. **Encrypted PDFs are refused.** Since 0.4.0 the PDF techniques reject
+   encrypted documents rather than risk writing one back out unprotected.
+   Decrypt the document yourself first if you need to embed into it.
+
+7. **The PDF content-stream payload format changed in 0.4.0.** A payload
+   embedded with 0.3.x or earlier cannot be extracted with 0.4.0: the
+   payload now carries a 32-bit length prefix, so the reader no longer
+   mistakes the document's own coordinates for payload bytes. Extract your
+   outstanding messages with 0.3.x before upgrading, or re-embed them.
+
+8. **PDF content-stream capacity is small and document-dependent.** The
+   technique stores one bit in the least significant bit of each numeric
+   operand of a page's content stream, so a document's capacity is set by
+   how much vector and text drawing it contains — a text-heavy page holds
+   far more than an image-only one. `analyse` reports the measured figure;
+   an image-only PDF may report no capacity at all.
+
+9. **The `survivable` compression profile cannot be read back by the `lsb`
+   extractor.** `embed-distributed --profile survivable` produces a cover
+   that survives a JPEG round trip, but the `lsb` extractor accepts only
+   PNG and BMP. The `dct` technique is the correct pairing for such a
+   cover and is not yet implemented, so a `survivable` cover can be
+   distributed but not yet extracted.
 
 ---
 
@@ -93,3 +142,7 @@ vulnerabilities within 14 days.
   override this per-file with a safety comment requirement
 - No secrets appear in tracing output at any log level
 - CI runs on three platforms (Linux, macOS, Windows)
+- CI requires the pdfium shared library, so a broken pdfium binding fails
+  the build instead of skipping the PDF tests
+- The release workflow checks the tag, the crate version, the `VERSION`
+  file and the changelog against each other before building anything
