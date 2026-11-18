@@ -66,6 +66,19 @@ jobs:
       - name: Rustfmt check
         run: cargo fmt --all -- --check
 
+  version:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      # The crate version, the VERSION file and the changelog have to agree.
+      # A release is cut from a tag, and the release workflow checks the tag
+      # against them — but catching the drift here means it never reaches a
+      # tag at all.
+      - name: Check version consistency
+        run: python3 scripts/release.py check
+
   deny:
     name: Supply Chain (cargo-deny)
     runs-on: ubuntu-latest
