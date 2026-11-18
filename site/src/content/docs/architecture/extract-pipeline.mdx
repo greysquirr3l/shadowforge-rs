@@ -1,0 +1,48 @@
+---
+title: "Extract Pipeline"
+description: "The stages shadowforge-rs runs when recovering a payload, from gathering covers to verifying the signature."
+---
+
+import Diagram from '../../../components/Diagram.astro';
+
+Extraction reverses the [embed pipeline](./embed-pipeline/), but it is not a mirror image. Covers
+may be missing, corrupted, or processed by a platform in between, so the extraction side has to
+tolerate partial failure rather than assume a clean round trip.
+
+<Diagram name="extract-pipeline" alt="Extract pipeline: gathering covers, reading each embedded payload, reconstructing missing shares, decrypting, verifying the signature, and returning the recovered payload.">
+Partial failure is expected: covers may be missing, and individual shares may fail their integrity check.
+</Diagram>
+
+## The stages
+
+| Stage | What happens | Where |
+|-------|--------------|-------|
+| **gather** | Collect whichever covers are available | `application/services` |
+| **decapsulate** | Recover the shared secret from the recipient's private key | `domain/crypto` |
+| **decode** | Read the embedded share out of each cover | `domain/stego` |
+| **reconstruct** | Discard shares that fail their HMAC tag, then rebuild from the remaining ones | `domain/reconstruction` |
+| **decrypt** | Open the reconstructed ciphertext | `domain/crypto` |
+| **verify** | Check the ML-DSA-87 signature | `domain/crypto` |
+
+## Reconstruction tolerates missing covers
+
+Reconstruction takes the shares it has and discards any whose HMAC-SHA-256 tag does not verify.
+A share that was corrupted in transit — by a platform recompressing the carrier, for example —
+fails the tag and is excluded. As long as at least K valid shares remain, the payload is
+recovered exactly.
+
+This is the mechanism that makes partial loss survivable rather than fatal. It is also why a
+corrupted share can never silently poison the output: it is rejected before it reaches the
+decoder.
+
+## Failure is reported, not guessed
+
+If fewer than K shares verify, or the signature does not check out, the extraction fails with an
+error rather than returning a partial payload. A tool whose output might be silently truncated
+is worse than useless for a source who has already decided what to publish.
+
+## Cover techniques are pluggable
+
+The `decode` stage is the only technique-specific part of the pipeline. Which technique was used
+is chosen by the caller, not inferred from the cover — the same discipline the embed side
+follows.

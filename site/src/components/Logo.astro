@@ -1,0 +1,56 @@
+---
+/**
+ * Header wordmark.
+ *
+ * Starlight renders the site title through the `SiteTitle` slot; this
+ * component replaces it with the project's own mark: the roundel cropped
+ * from `assets/img/shadowforge_logo.png`, followed by the wordmark in the
+ * project's two-tone treatment.
+ *
+ * The roundel is dark-on-dark artwork, so it is shown as a light-on-dark
+ * badge in both themes rather than being recoloured — recolouring a
+ * photographic crop would need a second asset per theme and would drift
+ * from the artwork.
+ */
+import roundel from '../assets/shadowforge_roundel.png';
+
+const { siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="sf-wordmark sl-flex">
+	<img class="sf-wordmark__mark" src={roundel.src} alt="" width={roundel.width} height={roundel.height} />
+	<span class="sf-wordmark__text" translate="no">
+		<span class="sf-wordmark__name">shadowforge</span><span class="sf-wordmark__suffix">-rs</span>
+	</span>
+</a>
+
+<style>
+	.sf-wordmark {
+		align-items: center;
+		gap: 0.5rem;
+		color: var(--sl-color-text-accent);
+		font-size: var(--sl-text-h4);
+		font-weight: 600;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.sf-wordmark:hover {
+		text-decoration: none;
+	}
+
+	.sf-wordmark__mark {
+		height: calc(var(--sl-nav-height) - 2 * var(--sl-nav-pad-y));
+		width: auto;
+		border-radius: 50%;
+	}
+
+	.sf-wordmark__name {
+		letter-spacing: -0.01em;
+	}
+
+	.sf-wordmark__suffix {
+		color: var(--sl-color-text-muted);
+		font-weight: 500;
+	}
+</style>

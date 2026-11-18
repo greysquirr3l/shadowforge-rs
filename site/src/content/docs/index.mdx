@@ -1,0 +1,119 @@
+---
+title: "shadowforge-rs"
+description: "Quantum-resistant steganography toolkit for journalists, whistleblowers, and dissidents operating against nation-state adversaries."
+tableOfContents: false
+---
+
+import { Card, CardGrid, Icon } from '@astrojs/starlight/components';
+
+<section class="sf-hero">
+	<div class="sf-hero__inner">
+		<span class="sf-hero__eyebrow">Pre-audit software</span>
+		<h1>Steganography for the journalist-vs-nation-state threat model</h1>
+		<p class="sf-hero__tagline">
+			shadowforge-rs hides encrypted payloads inside ordinary-looking cover media, then layers
+			post-quantum cryptography, forward error correction, and operational security
+			countermeasures on top.
+		</p>
+		<p class="sf-hero__positioning">
+			Built for sources and journalists who need a payload to survive a hostile platform's
+			recompression pipeline — and to survive legal compulsion to decrypt.
+		</p>
+		<div class="sf-hero__actions">
+			<a class="sf-button" href="/shadowforge-rs/guide/quickstart/">Quick start</a>
+			<a class="sf-button sf-button--ghost" href="/shadowforge-rs/guide/installation/">Installation</a>
+		</div>
+	</div>
+</section>
+
+<section class="sf-section">
+	<h2 class="sf-section__title">Capabilities</h2>
+	<p class="sf-section__lede">
+		Ten steganographic techniques across image, audio, PDF, text, and corpus selection, with
+		post-quantum protection and countermeasures for the attacks that actually matter against
+		adversaries with nation-state budgets.
+	</p>
+
+	<div class="sf-grid">
+		<a class="sf-card" href="/shadowforge-rs/architecture/crypto/">
+			<p class="sf-card__title">Post-quantum cryptography</p>
+			<p class="sf-card__body">
+				ML-KEM-1024 key encapsulation and ML-DSA-87 signatures, both pure Rust NIST
+				finalists. No liboqs, no CGo, no external crypto dependency to audit.
+			</p>
+			<p class="sf-card__meta">ml-kem · ml-dsa · argon2id · aes-256-gcm</p>
+		</a>
+
+		<a class="sf-card" href="/shadowforge-rs/architecture/bounded-contexts/">
+			<p class="sf-card__title">PDF as a first-class context</p>
+			<p class="sf-card__body">
+				Content-stream least-significant-bit embedding, metadata watermarking, and a
+				page-render pipeline — not a bolt-on. PDFs are the format sources actually
+				exchange.
+			</p>
+			<p class="sf-card__meta">lopdf · pdfium-render</p>
+		</a>
+
+		<a class="sf-card" href="/shadowforge-rs/cli/embed-distributed/">
+			<p class="sf-card__title">Distribution patterns</p>
+			<p class="sf-card__body">
+				1:1, 1:N, N:1, and N:M matrix distribution over Reed-Solomon K-of-N shards, so no
+				single compromised carrier loses the payload.
+			</p>
+			<p class="sf-card__meta">reed-solomon-erasure · hmac-sha256</p>
+		</a>
+
+		<a class="sf-card" href="/shadowforge-rs/opsec/overview/">
+			<p class="sf-card__title">Operational security</p>
+			<p class="sf-card__body">
+				Amnesiac mode writes nothing to disk, dual-payload deniability answers compulsion
+				with a decoy, and dead drop mode posts to public services without a direct transfer.
+			</p>
+			<p class="sf-card__meta">amnesiac · deniable · dead drop · scrubber</p>
+		</a>
+
+		<a class="sf-card" href="/shadowforge-rs/threats/steganalysis/">
+			<p class="sf-card__title">Countermeasures</p>
+			<p class="sf-card__body">
+				Adversarial embedding optimisation, camera-model fingerprint matching, and
+				compression-survivable embedding calibrated against real platform pipelines.
+			</p>
+			<p class="sf-card__meta">adaptive · corpus · canary · timelock</p>
+		</a>
+
+		<a class="sf-card" href="/shadowforge-rs/threats/overview/">
+			<p class="sf-card__title">Threat model first</p>
+			<p class="sf-card__body">
+				Compelled decryption, traffic analysis, endpoint compromise, legal pressure, and
+				stylometric identification are documented as design constraints, not footnotes.
+			</p>
+			<p class="sf-card__meta">threat model · residual risks</p>
+		</a>
+	</div>
+</section>
+
+<section class="sf-section">
+	<h2 class="sf-section__title">Where to next</h2>
+	<p class="sf-section__lede">
+		Read the threat model before the commands. The order matters in this project.
+	</p>
+
+	<div class="sf-grid">
+		<a class="sf-card" href="/shadowforge-rs/threats/overview/">
+			<p class="sf-card__title">Threat model</p>
+			<p class="sf-card__body">What the design defends against, and what it does not.</p>
+		</a>
+		<a class="sf-card" href="/shadowforge-rs/guide/quickstart/">
+			<p class="sf-card__title">Quick start</p>
+			<p class="sf-card__body">Encrypt, embed, extract, and verify a payload end to end.</p>
+		</a>
+		<a class="sf-card" href="/shadowforge-rs/cli/overview/">
+			<p class="sf-card__title">CLI reference</p>
+			<p class="sf-card__body">Every subcommand, flag, and output format.</p>
+		</a>
+		<a class="sf-card" href="/shadowforge-rs/architecture/design/">
+			<p class="sf-card__title">Architecture</p>
+			<p class="sf-card__body">Hexagonal layering, bounded contexts, and port traits.</p>
+		</a>
+	</div>
+</section>

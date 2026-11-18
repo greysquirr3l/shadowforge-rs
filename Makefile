@@ -1,4 +1,4 @@
-.PHONY: build test lint clean release completions deny coverage doc book book-serve check fmt
+.PHONY: build test lint clean release completions deny coverage doc site-build site-serve site-deploy site-deploy-dry check fmt
 
 BINARY   := shadowforge
 TARGET   := target/release/$(BINARY)
@@ -61,12 +61,20 @@ completions: build
 doc:
 	cargo doc --workspace --all-features --no-deps --open
 
-book:
-	mdbook build docs
-	@echo "Book written to docs/book/"
+# The documentation site is an Astro + Starlight project under site/, with its
+# own pnpm lockfile. `cargo` never sees it; nothing in the workspace reads it.
+site-build:
+	cd site && pnpm build
+	@echo "Site written to site/dist/"
 
-book-serve:
-	mdbook serve docs --open
+site-serve:
+	cd site && pnpm dev
+
+site-deploy:
+	cd site && pnpm run deploy
+
+site-deploy-dry:
+	cd site && pnpm run deploy:dry
 
 # ─── Corpus (sample index build for testing) ──────────────────────────────────
 

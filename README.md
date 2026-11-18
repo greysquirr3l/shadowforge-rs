@@ -306,7 +306,7 @@ journalist scenarios are available in the source repository (clone to
 access). They cover border crossings, dead drops, geographic distribution,
 time-lock source protection, and zero-trace operation.
 
-See `docs/src/opsec/` after cloning.
+See `site/src/content/docs/opsec/` after cloning.
 
 ---
 
@@ -329,7 +329,8 @@ make check      # fmt + lint + test + deny
 make coverage   # cargo tarpaulin (requires install)
 make deny       # cargo deny check
 make completions # generate shell completions
-make book       # build mdbook site locally
+make site-build  # build the documentation site (Astro + Starlight)
+make site-serve  # serve the documentation site locally
 make doc        # build rustdoc API docs
 ```
 

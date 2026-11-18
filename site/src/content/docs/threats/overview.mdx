@@ -1,0 +1,28 @@
+---
+title: "Threat Model Overview"
+description: "shadowforge-rs is designed for the journalist-vs-nation-state threat model. The primary adversary has:"
+---
+shadowforge-rs is designed for the **journalist-vs-nation-state** threat model. The primary adversary has:
+
+- Infrastructure-scale automated steganalysis (Aletheia, StegExpose)
+- Legal authority to compel decryption
+- Traffic analysis capabilities across ISPs and platforms
+- Endpoint access (device seizure, forensic imaging)
+- Stylometric analysis capabilities
+- Jurisdictional legal pressure across borders
+
+## Threat-to-Countermeasure Map
+
+| # | Threat | Countermeasure | Command / Flag |
+|---|--------|---------------|----------------|
+| 1 | [Automated steganalysis](/shadowforge-rs/threats/steganalysis/) | Adaptive embedding, cover profile matching, compression survival, corpus selection | `--profile adaptive`, `--profile survivable`, `corpus select` |
+| 2 | [Compelled decryption](/shadowforge-rs/threats/compelled-decryption/) | Deniable embedding, panic wipe, time-lock | `--deniable`, `panic`, `time-lock lock` |
+| 3 | [Traffic analysis](/shadowforge-rs/threats/traffic-analysis/) | Dead drop mode, platform-aware embedding | `dead-drop` |
+| 4 | [Endpoint compromise](/shadowforge-rs/threats/endpoint-compromise/) | Amnesiac mode, ZeroizeOnDrop | `--amnesia` |
+| 5 | [Legal/jurisdictional pressure](/shadowforge-rs/threats/legal-pressure/) | Geographic threshold distribution, canary shards | `--geo-manifest`, `--canary` |
+| 6 | [Stylometric identification](/shadowforge-rs/threats/stylometry/) | StyloScrubber | `scrub`, `--scrub-style` |
+| 7 | Internal leak attribution | Forensic watermarker | `watermark embed/detect` |
+
+## What shadowforge Does NOT Protect Against
+
+See [Residual Risks](/shadowforge-rs/threats/residual-risks/) for limitations and scenarios where shadowforge is insufficient.

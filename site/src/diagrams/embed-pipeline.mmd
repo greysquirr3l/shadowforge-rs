@@ -1,0 +1,24 @@
+%% shadowforge-rs — embed pipeline.
+%% Conceptual only: the stages and their order, not the parameters of any
+%% individual algorithm.
+flowchart TD
+    K["keygen — post-quantum key pair"]
+    KEM["encapsulate — derive a shared secret"]
+    ENC["encrypt — seal the payload"]
+    SHRD["shard — split into erasure-coded shares"]
+    EMB["embed — write into the cover"]
+    HARD["harden — apply the selected profile"]
+    DIST["distribute — deliver the covers"]
+
+    PAY[("payload")] --> ENC
+    K --> KEM
+    KEM --> ENC
+    ENC --> SHRD
+    SHRD --> EMB
+    COV[("cover media")] --> EMB
+    EMB --> HARD
+    HARD --> DIST
+
+    class K,KEM key
+    class ENC,SHRD,EMB,HARD,DIST step
+    class PAY,COV io

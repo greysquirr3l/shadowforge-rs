@@ -1,0 +1,21 @@
+---
+title: "Countermeasure Commands"
+description: "These commands address specific nation-state adversary capabilities. Each maps to a threat in the threat model."
+---
+These commands address specific nation-state adversary capabilities. Each maps to a threat in the [threat model](/shadowforge-rs/threats/overview/).
+
+| Command | Threat | Description |
+|---------|--------|-------------|
+| [`scrub`](/shadowforge-rs/cli/scrub/) | Stylometric identification | Normalise writing patterns |
+| [`dead-drop`](/shadowforge-rs/cli/dead-drop/) | Traffic analysis | Platform-aware public posting |
+| [`time-lock`](/shadowforge-rs/cli/time-lock/) | Time-sensitive sources | Delayed-reveal payloads |
+| [`watermark`](/shadowforge-rs/cli/watermark/) | Insider attribution | Recipient fingerprinting |
+| [`corpus`](/shadowforge-rs/cli/corpus/) | Statistical steganalysis | Zero-modification cover selection |
+
+These capabilities are also available as flags on the core `embed` command:
+
+- `--scrub-style` — inline stylometric scrubbing
+- `--deniable` — dual-payload deniable embedding
+- `--amnesia` — zero disk writes
+- `--profile adaptive` — bounded detectability
+- `--profile survivable --platform <P>` — compression survival
