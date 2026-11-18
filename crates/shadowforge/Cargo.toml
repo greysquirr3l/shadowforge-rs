@@ -76,6 +76,16 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 hound = "3.5"
 
+# ─── JPEG DCT coefficients ────────────────────────────────────────────────────
+# dct-io reads and writes *quantized* DCT coefficients for baseline JPEG
+# (SOF0/SOF1). It is the only pure-Rust, zero-dependency, `#![forbid(unsafe_code)]`
+# option that exposes the coefficient domain in both directions: `zune-jpeg`
+# (used internally by `image`) decodes to pixels only and keeps `raw_coeff`
+# private, so DCT-domain embedding is impossible without it.
+#
+# Pinned exactly: single-author crate, so each bump gets an explicit audit.
+dct-io = "=0.1.1"
+
 # ─── PDF ──────────────────────────────────────────────────────────────────────
 # Both crates are intentionally enabled by the `pdf` feature:
 # - lopdf: structural parse/write and metadata/content-stream manipulation

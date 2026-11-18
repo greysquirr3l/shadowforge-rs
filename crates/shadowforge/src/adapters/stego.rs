@@ -245,18 +245,17 @@ impl ExtractTechnique for LsbImage {
     }
 }
 
-/// DCT-based JPEG steganography adapter (STUB).
+/// DCT-based JPEG steganography adapter.
 ///
-/// **NOT YET IMPLEMENTED**: Requires a pure-Rust JPEG library that exposes
-/// DCT coefficients without unsafe code. Current Rust JPEG libraries either:
-/// - Decode to pixels only (jpeg-decoder, image crate)
-/// - Require unsafe bindings (mozjpeg-sys, libjpeg-turbo-sys)
+/// Carries the payload in the *quantized* DCT coefficients of a baseline
+/// JPEG, via the [`crate::adapters::dct`] module. The carrier slot set is
+/// derived from the block structure rather than from coefficient values,
+/// which is what lets the payload survive a recompression that uses the same
+/// quantisation tables -- the property the `CompressionSurvivable` embedding
+/// profile depends on.
 ///
-/// TODO(T12): Implement DCT coefficient access and modification:
-/// - Parse JPEG to access non-zero AC DCT coefficients
-/// - Embed payload in LSBs of coefficients (skip DC and zeros)
-/// - Preserve quantization and Huffman tables
-/// - Re-encode JPEG with modified coefficients
+/// Only baseline JPEG (SOF0/SOF1) is supported; progressive JPEG is rejected
+/// by the coefficient codec.
 #[derive(Debug, Default)]
 pub struct DctJpeg;
 
@@ -273,18 +272,12 @@ impl EmbedTechnique for DctJpeg {
         StegoTechnique::DctJpeg
     }
 
-    fn capacity(&self, _cover: &CoverMedia) -> Result<Capacity, StegoError> {
-        Err(StegoError::UnsupportedCoverType {
-            reason: "DCT JPEG steganography not yet implemented (requires DCT coefficient access)"
-                .to_string(),
-        })
+    fn capacity(&self, cover: &CoverMedia) -> Result<Capacity, StegoError> {
+        crate::adapters::dct::capacity(cover)
     }
 
-    fn embed(&self, _cover: CoverMedia, _payload: &Payload) -> Result<CoverMedia, StegoError> {
-        Err(StegoError::UnsupportedCoverType {
-            reason: "DCT JPEG steganography not yet implemented (requires DCT coefficient access)"
-                .to_string(),
-        })
+    fn embed(&self, cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoError> {
+        crate::adapters::dct::embed(cover, payload)
     }
 }
 
@@ -293,11 +286,8 @@ impl ExtractTechnique for DctJpeg {
         StegoTechnique::DctJpeg
     }
 
-    fn extract(&self, _cover: &CoverMedia) -> Result<Payload, StegoError> {
-        Err(StegoError::UnsupportedCoverType {
-            reason: "DCT JPEG steganography not yet implemented (requires DCT coefficient access)"
-                .to_string(),
-        })
+    fn extract(&self, stego: &CoverMedia) -> Result<Payload, StegoError> {
+        crate::adapters::dct::extract(stego)
     }
 }
 
@@ -1171,34 +1161,34 @@ mod tests {
     }
 
     #[test]
-    fn test_dct_jpeg_stub_returns_not_implemented() {
+    fn test_dct_jpeg_rejects_empty_jpeg() {
         let embedder = DctJpeg::new();
 
         let cover = CoverMedia {
-            kind: CoverMediaKind::JpegImage,
+            kind: CoverMediaKind::JpegEncoded,
             data: vec![].into(),
             metadata: std::collections::HashMap::new(),
         };
 
         let payload = Payload::from_bytes(vec![1, 2, 3]);
 
-        // Should return UnsupportedCoverType error indicating not implemented
+        // An empty buffer is not a decodable JPEG.
         let result = embedder.embed(cover.clone(), &payload);
         assert!(matches!(
             result,
-            Err(StegoError::UnsupportedCoverType { .. })
+            Err(StegoError::MalformedCoverData { .. })
         ));
 
         let result = embedder.extract(&cover);
         assert!(matches!(
             result,
-            Err(StegoError::UnsupportedCoverType { .. })
+            Err(StegoError::MalformedCoverData { .. })
         ));
 
         let result = embedder.capacity(&cover);
         assert!(matches!(
             result,
-            Err(StegoError::UnsupportedCoverType { .. })
+            Err(StegoError::MalformedCoverData { .. })
         ));
     }
 
@@ -1780,31 +1770,41 @@ mod tests {
     }
 
     #[test]
-    fn dct_jpeg_stub_capacity_returns_error() {
+    fn dct_jpeg_rejects_non_jpeg_cover() {
         let dct = DctJpeg::new();
-        assert!(dct.capacity(&dummy_cover()).is_err());
+        let png = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: bytes::Bytes::from_static(b"\x89PNG\r\n\x1a\n"),
+            metadata: std::collections::HashMap::new(),
+        };
+        assert!(matches!(
+            dct.capacity(&png),
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
+        assert!(matches!(
+            dct.embed(png, &Payload::from_bytes(vec![1])),
+            Err(StegoError::UnsupportedCoverType { .. })
+        ));
         assert_eq!(EmbedTechnique::technique(&dct), StegoTechnique::DctJpeg);
-    }
-
-    #[test]
-    fn dct_jpeg_stub_embed_returns_error() {
-        let dct = DctJpeg::new();
-        let result = dct.embed(dummy_cover(), &Payload::from_bytes(vec![1]));
-        assert!(matches!(
-            result,
-            Err(StegoError::UnsupportedCoverType { .. })
-        ));
-    }
-
-    #[test]
-    fn dct_jpeg_stub_extract_returns_error() {
-        let dct = DctJpeg::new();
-        let result = dct.extract(&dummy_cover());
-        assert!(matches!(
-            result,
-            Err(StegoError::UnsupportedCoverType { .. })
-        ));
         assert_eq!(ExtractTechnique::technique(&dct), StegoTechnique::DctJpeg);
+    }
+
+    #[test]
+    fn dct_jpeg_rejects_malformed_jpeg() {
+        let dct = DctJpeg::new();
+        let broken = CoverMedia {
+            kind: CoverMediaKind::JpegEncoded,
+            data: bytes::Bytes::from_static(b"\xFF\xD8\xFF\xE0not-a-jpeg"),
+            metadata: std::collections::HashMap::new(),
+        };
+        assert!(matches!(
+            dct.capacity(&broken),
+            Err(StegoError::MalformedCoverData { .. })
+        ));
+        assert!(matches!(
+            dct.extract(&broken),
+            Err(StegoError::MalformedCoverData { .. })
+        ));
     }
 
     #[test]

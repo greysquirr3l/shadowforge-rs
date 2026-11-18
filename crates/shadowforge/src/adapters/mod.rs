@@ -7,6 +7,7 @@ pub mod canary;
 pub mod corpus;
 pub mod correction;
 pub mod crypto;
+pub mod dct;
 pub mod deadrop;
 pub mod distribution;
 pub mod media;
