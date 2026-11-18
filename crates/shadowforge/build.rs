@@ -1,21 +1,100 @@
-//! Build script: embeds git SHA, commit timestamp, and checks pdfium availability.
+//! Build script: embeds git SHA and checks pdfium availability.
+//!
+//! Sets `SHADOWFORGE_GIT_SHA` at compile time (`cargo:rustc-env=...`) so
+//! `shadowforge --version` can report `<crate-version> (<sha>)`. The commit
+//! is what distinguishes two builds of the same version.
+//!
+//! Provenance is best-effort: a source tarball has no `.git`, and some
+//! minimal environments have no `git` binary. Both fall back to `"unknown"`
+//! rather than failing the build, because a build that refuses to produce a
+//! binary is worse than a binary that cannot name its commit.
+
 use std::env;
 use std::path::Path;
-use vergen::EmitBuilder;
+use std::process::Command;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    EmitBuilder::builder()
-        .git_sha(false)
-        .git_commit_timestamp()
-        .emit()?;
+/// Recorded when the commit cannot be determined.
+const UNKNOWN: &str = "unknown";
+
+fn main() {
+    emit_git_sha();
 
     // CARGO_FEATURE_PDF is set by Cargo when the `pdf` feature is enabled.
     // cfg!(feature = ...) does not reflect enabled features in build scripts.
     if env::var("CARGO_FEATURE_PDF").is_ok() {
         check_pdfium_availability();
     }
+}
 
-    Ok(())
+/// Embed the current commit SHA, or `"unknown"` when it cannot be determined.
+fn emit_git_sha() {
+    // Re-run this script when HEAD moves, when the ref it points at advances,
+    // or when the index changes, so a rebuild picks up the new SHA rather
+    // than reusing a cached one.
+    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    println!("cargo:rerun-if-changed=../../.git/index");
+    // The dirty check depends on unstaged edits anywhere in the tree, which
+    // touch no single well-known path. Watching a path that never exists
+    // makes cargo treat it as always-changed, forcing a rerun so the dirty
+    // marker never goes stale between real commits.
+    println!("cargo:rerun-if-changed=../../.git/SHADOWFORGE_FORCE_RERUN");
+    // Cargo does not re-run a build script when only its environment changes,
+    // so a build that reuses a cached layer would keep baking in the commit
+    // of the earlier build.
+    println!("cargo:rerun-if-env-changed=SHADOWFORGE_GIT_SHA_OVERRIDE");
+
+    let sha = env::var("SHADOWFORGE_GIT_SHA_OVERRIDE")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            git_short_sha().map(|sha| {
+                if git_is_dirty() {
+                    format!("{sha}-dirty")
+                } else {
+                    sha
+                }
+            })
+        })
+        .unwrap_or_else(|| UNKNOWN.to_owned());
+
+    println!("cargo:rustc-env=SHADOWFORGE_GIT_SHA={sha}");
+}
+
+/// Run `git rev-parse --short=12 HEAD` and return the trimmed SHA.
+///
+/// Returns `None` (never panics) on any failure: `git` missing from `PATH`,
+/// non-zero exit status, or non-UTF-8 output.
+fn git_short_sha() -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short=12", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8(output.stdout).ok()?;
+    let trimmed = sha.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+/// Whether the working tree has uncommitted changes anywhere in the repo.
+///
+/// Scoped to the whole repo, not just this crate's directory, because
+/// `HEAD`'s tree hash covers the whole repo — a change in an unrelated
+/// crate still means the SHA alone does not describe the tree that was
+/// actually compiled. Returns `false` (never panics) on any failure: with no
+/// resolvable `git`, there is nothing to compare against anyway.
+fn git_is_dirty() -> bool {
+    Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| !output.stdout.is_empty())
 }
 
 /// Check if the pdfium shared library is findable; emit a warning only when it is not.

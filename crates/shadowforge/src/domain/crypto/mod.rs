@@ -6,8 +6,7 @@
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key as AesKey, KeyInit, Nonce};
-use argon2::password_hash::SaltString;
-use argon2::{Argon2, Params, PasswordHasher};
+use argon2::{Argon2, Params};
 use bytes::{BufMut, Bytes, BytesMut};
 use ml_dsa::{
     EncodedSignature, EncodedVerifyingKey, MlDsa87, SigningKey, VerifyingKey, signature::Keypair,
@@ -255,13 +254,20 @@ pub fn encrypt_aes_gcm(key: &[u8], nonce: &[u8], plaintext: &[u8]) -> Result<Byt
         });
     }
 
-    let aes_key = AesKey::<Aes256Gcm>::from_slice(key);
-    let cipher = Aes256Gcm::new(aes_key);
-    let aes_nonce = Nonce::from_slice(nonce);
+    let aes_key =
+        AesKey::<Aes256Gcm>::try_from(key).map_err(|_| CryptoError::InvalidKeyLength {
+            expected: AES_KEY_LEN,
+            got: key.len(),
+        })?;
+    let cipher = Aes256Gcm::new(&aes_key);
+    let aes_nonce = Nonce::try_from(nonce).map_err(|_| CryptoError::InvalidNonceLength {
+        expected: AES_NONCE_LEN,
+        got: nonce.len(),
+    })?;
 
     let ciphertext =
         cipher
-            .encrypt(aes_nonce, plaintext)
+            .encrypt(&aes_nonce, plaintext)
             .map_err(|e| CryptoError::EncryptionFailed {
                 reason: e.to_string(),
             })?;
@@ -289,13 +295,20 @@ pub fn decrypt_aes_gcm(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<By
         });
     }
 
-    let aes_key = AesKey::<Aes256Gcm>::from_slice(key);
-    let cipher = Aes256Gcm::new(aes_key);
-    let aes_nonce = Nonce::from_slice(nonce);
+    let aes_key =
+        AesKey::<Aes256Gcm>::try_from(key).map_err(|_| CryptoError::InvalidKeyLength {
+            expected: AES_KEY_LEN,
+            got: key.len(),
+        })?;
+    let cipher = Aes256Gcm::new(&aes_key);
+    let aes_nonce = Nonce::try_from(nonce).map_err(|_| CryptoError::InvalidNonceLength {
+        expected: AES_NONCE_LEN,
+        got: nonce.len(),
+    })?;
 
     let plaintext =
         cipher
-            .decrypt(aes_nonce, ciphertext)
+            .decrypt(&aes_nonce, ciphertext)
             .map_err(|e| CryptoError::DecryptionFailed {
                 reason: e.to_string(),
             })?;
@@ -327,23 +340,17 @@ pub fn derive_key(password: &[u8], salt: &[u8], output_len: usize) -> Result<Byt
 
     let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
 
-    // Create a SaltString from the provided salt
-    let salt_str = SaltString::encode_b64(salt).map_err(|e| CryptoError::KdfFailed {
-        reason: e.to_string(),
-    })?;
-
-    let hash = argon2
-        .hash_password(password, &salt_str)
+    // `hash_password_into` takes the raw salt bytes and writes the raw
+    // derived key into `out`. (argon2 0.5's `hash_password` took a
+    // base64-encoded `SaltString` and decoded it back to these same bytes.)
+    let mut out = vec![0u8; output_len];
+    argon2
+        .hash_password_into(password, salt, &mut out)
         .map_err(|e| CryptoError::KdfFailed {
             reason: e.to_string(),
         })?;
 
-    // Extract the derived key from the hash
-    let hash_output = hash.hash.ok_or_else(|| CryptoError::KdfFailed {
-        reason: "no hash output".into(),
-    })?;
-
-    Ok(Bytes::copy_from_slice(hash_output.as_bytes()))
+    Ok(Bytes::from(out))
 }
 
 // ─── Full Encryption Pipeline ────────────────────────────────────────────────

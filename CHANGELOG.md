@@ -10,6 +10,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Workspace switches to `resolver = "3"`** — Cargo's MSRV-aware
+  resolver prefers dependency versions that still support the declared
+  `rust-version`, instead of silently selecting newer ones that require a
+  newer compiler. The pinned toolchain stays at 1.94.1: the update to the
+  latest dependency set raises the highest MSRV among transitive
+  dependencies only to 1.89, so the existing floor still holds.
+
+- **Dropped `vergen` in favour of the `git` CLI** — vergen 10 moved git
+  support into a separate crate that links libgit2, which is a heavy C
+  dependency for embedding a single commit SHA. The build script now
+  shells out to `git` directly, matching the pattern used by the
+  project's other Rust workspaces, and reports `"unknown"` rather than
+  failing the build when git is unavailable (source tarballs, minimal
+  containers). The embedded SHA also carries a `-dirty` suffix when the
+  working tree had uncommitted changes at build time.
+
+- **Removed the dead workspace-root `build.rs`** — the workspace root is a
+  virtual manifest (no `[package]`), so this file was never compiled or
+  executed. It was a leftover vergen build script.
+
+- **Removed the `[patch.crates-io]` override for `pdfium-render`** — the
+  override existed to carry an upstream `c_char` fix (E0308 on platforms
+  where `c_char` is unsigned) that was not yet released. `pdfium-render`
+  0.9.3 ships the fix, and the crate is now used at the released 0.9.5
+  with no patch. The `deny.toml` git-source allowance that only existed
+  for this override was removed with it.
+
+- **Updated dependencies to their latest compatible versions** — `lopdf`
+  0.42 → 0.47, `aes-gcm` 0.10 → 0.11, `argon2` 0.5 → 0.6, `zip` 8 → 9,
+  `base64` 0.22 → 0.23, `num-bigint` 0.4 → 0.5, `ml-kem` 0.3.2 → 0.3.4,
+  `ml-dsa` 0.1.1 → 0.1.2, `rstest` 0.26 → 0.28, and the full transitive
+  graph. `cargo outdated --root-deps-only` now reports every root
+  dependency current.
+
 - **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
   open alerts were the same false-positive pattern (test fixtures like
   `let key = vec![0u8; 32];` or zero-initialised buffers immediately
@@ -18,6 +52,40 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   See the config file for the rationale and the alternative controls
   (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
   that still cover any real hard-coded-key regression.
+
+### Fixed
+
+- **Path traversal via ZIP entry names** — `unpack_zip` took the raw
+  entry name and the CLI wrote it to `output_dir.join(name)`, so a crafted
+  archive containing an entry named `../../etc/passwd` wrote outside the
+  directory the user chose. Entry names are now resolved through
+  `enclosed_name()`, falling back to `mangled_name()`, which cannot
+  resolve above the output directory. Covered by a new test.
+
+- **`cargo deny` now passes** — the dependency refresh resolved 20+ outstanding
+  advisories (including the `zip` extraction symlink and `flate2`
+  decompression advisories, and the `crossbeam-epoch` pointer-dereference
+  issue) along with three yanked crates. The remaining `chrono`
+  unmaintained advisory (RUSTSEC-2026-0543) is explicitly ignored with a
+  rationale: it has no fixed release and arrives transitively through
+  `lopdf` and `pdfium-render`, so it cannot be removed without dropping PDF
+  support.
+
+- **Argon2id key derivation migrated to `hash_password_into`** — argon2 0.6
+  removed the `hash_password`/`SaltString` API. The replacement takes the
+  raw salt bytes directly instead of round-tripping them through base64.
+  Derived keys are byte-identical to the previous implementation, so
+  existing payloads remain decryptable.
+
+- **AES-256-GCM key and nonce construction moved to `TryFrom`** — aes-gcm
+  0.11 deprecated `Array::from_slice`. Length mismatches now surface as the
+  existing `InvalidKeyLength` / `InvalidNonceLength` errors instead of
+  panicking.
+
+- **New clippy lints from the 1.98 toolchain** — `chunks_exact` with a
+  constant chunk size (now `as_chunks`), `suboptimal_flops` (now
+  `mul_add`), and a missing `#[must_use]` are all fixed rather than
+  suppressed, keeping `cargo clippy -- -D warnings` green.
 
 ## [0.3.7] — 2026-06-26
 
@@ -28,6 +96,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   recursion; a crafted ~21 KB PDF with ~10,380-deep nested arrays aborts the
   process via SIGABRT (uncatchable with `catch_unwind`), enabling trivial
   DoS against any service parsing untrusted PDFs. Fixed upstream in 0.42.0.
+
+- **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
+  open alerts were the same false-positive pattern (test fixtures like
+  `let key = vec![0u8; 32];` or zero-initialised buffers immediately
+  overwritten by RNG/SHA256). Configured via
+  `.github/codeql/codeql-config.yml` and dismissed as `false positive`.
+  See the config file for the rationale and the alternative controls
+  (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
+  that still cover any real hard-coded-key regression.
 
 ### Fixed
 
@@ -68,6 +145,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   `rand` feature, which eliminated the transitive `rand 0.8.5` dependency from
   the workspace dependency graph
 
+- **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
+  open alerts were the same false-positive pattern (test fixtures like
+  `let key = vec![0u8; 32];` or zero-initialised buffers immediately
+  overwritten by RNG/SHA256). Configured via
+  `.github/codeql/codeql-config.yml` and dismissed as `false positive`.
+  See the config file for the rationale and the alternative controls
+  (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
+  that still cover any real hard-coded-key regression.
+
 ### Fixed
 
 - **Version alignment** — synchronized repository release marker in `VERSION`
@@ -77,6 +163,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   now passes cleanly without advisory ignore entries
 
 ## [0.3.5] — 2026-04-22
+
+- **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
+  open alerts were the same false-positive pattern (test fixtures like
+  `let key = vec![0u8; 32];` or zero-initialised buffers immediately
+  overwritten by RNG/SHA256). Configured via
+  `.github/codeql/codeql-config.yml` and dismissed as `false positive`.
+  See the config file for the rationale and the alternative controls
+  (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
+  that still cover any real hard-coded-key regression.
 
 ### Fixed
 
@@ -111,6 +206,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   and on a weekly schedule
 - **CodeQL Analysis workflow** — static analysis for Rust via GitHub's CodeQL
   engine on push, PR, and weekly schedule
+
+- **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
+  open alerts were the same false-positive pattern (test fixtures like
+  `let key = vec![0u8; 32];` or zero-initialised buffers immediately
+  overwritten by RNG/SHA256). Configured via
+  `.github/codeql/codeql-config.yml` and dismissed as `false positive`.
+  See the config file for the rationale and the alternative controls
+  (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
+  that still cover any real hard-coded-key regression.
 
 ### Fixed
 
@@ -190,6 +294,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   name constraint bypass); transitively pulled in via `ureq → rustls`
 
 ## [0.3.1] — 2026-04-15
+
+- **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
+  open alerts were the same false-positive pattern (test fixtures like
+  `let key = vec![0u8; 32];` or zero-initialised buffers immediately
+  overwritten by RNG/SHA256). Configured via
+  `.github/codeql/codeql-config.yml` and dismissed as `false positive`.
+  See the config file for the rationale and the alternative controls
+  (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
+  that still cover any real hard-coded-key regression.
 
 ### Fixed
 
@@ -274,6 +387,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   inline PDF setup, and contributing guide link
 - `OPERATIONAL_SECURITY.md` moved to gitignore (content preserved in
   `docs/src/opsec/` for repo cloners)
+
+- **Disabled CodeQL `rust/hard-coded-cryptographic-value` query** — all 26
+  open alerts were the same false-positive pattern (test fixtures like
+  `let key = vec![0u8; 32];` or zero-initialised buffers immediately
+  overwritten by RNG/SHA256). Configured via
+  `.github/codeql/codeql-config.yml` and dismissed as `false positive`.
+  See the config file for the rationale and the alternative controls
+  (`unsafe_code = "forbid"`, `cargo-deny`, `gitleaks`, code review)
+  that still cover any real hard-coded-key regression.
 
 ### Fixed
 

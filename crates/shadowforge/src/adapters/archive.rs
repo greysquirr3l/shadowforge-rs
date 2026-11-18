@@ -174,7 +174,21 @@ fn unpack_zip(archive: &[u8]) -> Result<Vec<(String, Bytes)>, ArchiveError> {
         if file.is_dir() {
             continue;
         }
-        let name = file.name().to_string();
+        // Entry names are used as paths under the caller's output directory,
+        // so they must not be able to escape it. `enclosed_name()` returns
+        // `None` for names that are absolute or contain a `..` component
+        // that walks above the root; `mangled_name()` rewrites those into a
+        // safe equivalent. We prefer the exact path and only fall back to
+        // the rewritten one when the exact path cannot be represented.
+        let name = match file.enclosed_name() {
+            Some(path) => path.to_string_lossy().into_owned(),
+            None => match file.mangled_name() {
+                Ok(path) => path.to_string_lossy().into_owned(),
+                // The name could not be decoded as UTF-8 or CP437 at all;
+                // there is no safe name to write this entry under.
+                Err(_) => continue,
+            },
+        };
         let mut data = Vec::new();
         file.take(MAX_ENTRY_SIZE)
             .read_to_end(&mut data)
@@ -350,6 +364,42 @@ mod tests {
         assert_eq!(
             unpacked.first().ok_or("index out of bounds")?.1.as_ref(),
             b"nested file content"
+        );
+        Ok(())
+    }
+
+    /// A ZIP entry named with a traversal component must not yield a name
+    /// that escapes the output directory when joined to it.
+    ///
+    /// The CLI writes unpacked entries to `output_dir.join(name)`, so a name
+    /// like `../../etc/passwd` would write outside the directory the user
+    /// chose. The entry name is rewritten to stay inside instead.
+    #[test]
+    fn zip_traversal_entry_name_stays_inside_output_dir() -> TestResult {
+        let handler = ArchiveHandlerImpl::new();
+
+        // Pack a traversal name. `start_file` stores it verbatim.
+        let packed = handler.pack(
+            &[("../escape.txt", b"traversal" as &[u8])],
+            ArchiveFormat::Zip,
+        )?;
+        let unpacked = handler.unpack(&packed, ArchiveFormat::Zip)?;
+
+        let name = &unpacked.first().ok_or("no entries unpacked")?.0;
+
+        // The name must not contain a component that climbs above the output
+        // directory. (Comparing joined paths is not enough: `Path::starts_with`
+        // compares components without resolving `..`, so `/out/../escape.txt`
+        // would still "start with" `/out`.)
+        assert!(
+            !std::path::Path::new(name)
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir)),
+            "entry name {name:?} escapes the output directory"
+        );
+        assert!(
+            !std::path::Path::new(name).is_absolute(),
+            "entry name {name:?} is absolute"
         );
         Ok(())
     }

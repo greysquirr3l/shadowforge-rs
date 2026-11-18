@@ -65,7 +65,7 @@ pub fn dispatch(cli: Cli) -> Result<(), AppError> {
 
 fn print_version() {
     let version = env!("CARGO_PKG_VERSION");
-    let sha = option_env!("VERGEN_GIT_SHA").unwrap_or("unknown");
+    let sha = option_env!("SHADOWFORGE_GIT_SHA").unwrap_or("unknown");
     println!("shadowforge {version} ({sha})");
 }
 
