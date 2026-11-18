@@ -414,6 +414,49 @@ impl PlatformSettings {
 /// decode.  No temporary files are used — bytes flow through a `Cursor`.
 pub struct CompressionSimulatorImpl;
 
+impl CompressionSimulatorImpl {
+    /// Recompress a cover that carries encoded JPEG bytes at `quality`.
+    ///
+    /// The cover is decoded to pixels, re-encoded as JPEG at the platform's
+    /// quality, and handed back as encoded JPEG bytes. The result stays in
+    /// the encoded domain so that a payload embedded in the DCT coefficients
+    /// remains extractable after the simulated platform recompression.
+    fn recompress_jpeg_bytes(
+        cover: CoverMedia,
+        quality: u8,
+    ) -> Result<CoverMedia, AdaptiveError> {
+        let decoded = image::load_from_memory_with_format(&cover.data, image::ImageFormat::Jpeg)
+            .map_err(|e| AdaptiveError::CompressionSimFailed {
+                reason: format!("JPEG decode failed: {e}"),
+            })?
+            .to_rgb8();
+        let (w, h) = (decoded.width(), decoded.height());
+
+        let mut encoded: Vec<u8> = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut encoded);
+            let mut jpeg_encoder =
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
+            jpeg_encoder
+                .encode(decoded.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+                .map_err(|e| AdaptiveError::CompressionSimFailed {
+                    reason: format!("JPEG encode failed: {e}"),
+                })?;
+        }
+
+        let mut out_meta = cover.metadata;
+        out_meta.insert("width".to_string(), w.to_string());
+        out_meta.insert("height".to_string(), h.to_string());
+
+        Ok(CoverMedia {
+            kind: CoverMediaKind::JpegEncoded,
+            data: Bytes::from(encoded),
+            metadata: out_meta,
+        })
+    }
+
+}
+
 impl CompressionSimulator for CompressionSimulatorImpl {
     fn simulate(
         &self,
@@ -422,6 +465,14 @@ impl CompressionSimulator for CompressionSimulatorImpl {
     ) -> Result<CoverMedia, AdaptiveError> {
         let settings = PlatformSettings::for_platform(platform);
         let quality = settings.jpeg_quality;
+
+        // A cover that already carries encoded JPEG bytes is recompressed as
+        // a JPEG file, so the result stays in the encoded domain. That keeps
+        // DCT-domain payloads extractable: the simulator must not hand back
+        // raw pixels for a cover whose payload lives in the coefficients.
+        if cover.kind == CoverMediaKind::JpegEncoded {
+            return Self::recompress_jpeg_bytes(cover, quality);
+        }
 
         let width = cover
             .metadata

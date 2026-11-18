@@ -4,6 +4,7 @@
 use crate::domain::distribution::{assign_many_to_many, assign_one_to_many, validate_cover_count};
 use crate::domain::errors::DistributionError;
 use crate::domain::ports::{Distributor, EmbedTechnique, ErrorCorrector};
+use crate::domain::reconstruction::serialize_shard;
 use crate::domain::types::{CoverMedia, DistributionPattern, EmbeddingProfile, Payload};
 
 /// Concrete [`Distributor`] implementation.
@@ -194,7 +195,7 @@ fn distribute_one_to_many(
                 needed: shard_idx.strict_add(1),
                 got: shards.len(),
             })?;
-        let shard_payload = Payload::from_bytes(shard.data.clone());
+        let shard_payload = Payload::from_bytes(serialize_shard(shard));
         let cover = result.remove(cover_idx);
         let stego = embedder.embed(cover, &shard_payload).map_err(|source| {
             DistributionError::EmbedFailed {

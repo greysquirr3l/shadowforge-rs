@@ -287,6 +287,28 @@ impl DistributeService {
         // output cover against its source for detectability scoring.
         let original_covers_opt: Option<Vec<CoverMedia>> =
             matches!(profile, EmbeddingProfile::Adaptive { .. }).then(|| prepared_covers.clone());
+
+        // The compression-survivable profile simulates the platform's
+        // recompression. For an encoded-domain technique that simulation has
+        // to happen *before* embedding: the payload must be written into the
+        // coefficients of the JPEG the platform will actually serve, which is
+        // the platform-quality encoding of the cover. Embedding first and
+        // compressing afterwards would requantise the coefficients the
+        // payload was just written into.
+        let (prepared_covers, simulate_after) = match profile {
+            EmbeddingProfile::CompressionSurvivable { platform }
+                if embedder.technique() == StegoTechnique::DctJpeg =>
+            {
+                let compressed = prepared_covers
+                    .into_iter()
+                    .map(|cover| deps.compressor.simulate(cover, platform))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(AppError::from)?;
+                (compressed, false)
+            }
+            _ => (prepared_covers, true),
+        };
+
         let distributed = distributor.distribute(payload, profile, prepared_covers, embedder)?;
 
         if distributed.len() != original_cover_count {
@@ -314,11 +336,17 @@ impl DistributeService {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(AppError::from)
             }
-            EmbeddingProfile::CompressionSurvivable { platform } => distributed
-                .into_iter()
-                .map(|stego| deps.compressor.simulate(stego, platform))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(AppError::from),
+            EmbeddingProfile::CompressionSurvivable { platform } => {
+                if simulate_after {
+                    distributed
+                        .into_iter()
+                        .map(|stego| deps.compressor.simulate(stego, platform))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(AppError::from)
+                } else {
+                    Ok(distributed)
+                }
+            }
         }
     }
 }

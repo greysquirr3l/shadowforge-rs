@@ -327,6 +327,16 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     let covers = covers?;
 
     let profile = resolve_profile(args.profile, args.platform);
+
+    // Reject an unsupported profile/technique pairing before any work is
+    // done, so the user gets an actionable message rather than a cover that
+    // cannot be extracted from later.
+    if let Some(reason) = profile.unsupported_technique(technique) {
+        return Err(AppError::Cli {
+            reason: format!("--profile is incompatible with the chosen technique: {reason}"),
+        });
+    }
+
     let (mut stego_covers, generated_hmac_key) =
         distribute_covers(args, &payload, covers, &profile, embedder.as_ref())?;
 
@@ -1010,8 +1020,10 @@ fn load_cover_from_path(path: &Path, technique: StegoTechnique) -> Result<CoverM
             let data = fs_read(path)?;
             Ok(load_cover(technique, &data))
         }
+        // DCT embedding works on the encoded entropy stream, so the cover
+        // must stay in its file form rather than being decoded to pixels.
+        StegoTechnique::DctJpeg => load_jpeg_cover(path),
         StegoTechnique::LsbImage
-        | StegoTechnique::DctJpeg
         | StegoTechnique::Palette
         | StegoTechnique::CorpusSelection
         | StegoTechnique::DualPayload => {
@@ -1019,6 +1031,26 @@ fn load_cover_from_path(path: &Path, technique: StegoTechnique) -> Result<CoverM
             loader.load(path).map_err(map_media_error)
         }
     }
+}
+
+/// Load a JPEG cover as encoded file bytes for DCT-domain embedding.
+fn load_jpeg_cover(path: &Path) -> Result<CoverMedia, AppError> {
+    let data = fs_read(path)?;
+    if !data.starts_with(&[0xFF, 0xD8]) {
+        return Err(AppError::Stego(
+            crate::domain::errors::StegoError::UnsupportedCoverType {
+                reason: format!(
+                    "DCT JPEG requires a JPEG cover, but {} is not a JPEG file",
+                    path.display()
+                ),
+            },
+        ));
+    }
+    Ok(CoverMedia {
+        kind: CoverMediaKind::JpegEncoded,
+        data: bytes::Bytes::from(data),
+        metadata: std::collections::HashMap::new(),
+    })
 }
 
 #[cfg(feature = "pdf")]
@@ -1055,8 +1087,10 @@ fn save_cover_to_path(media: &CoverMedia, path: &Path) -> Result<(), AppError> {
             let loader = crate::adapters::media::AudioMediaLoader;
             loader.save(media, path).map_err(map_media_error)
         }
+        CoverMediaKind::JpegEncoded | CoverMediaKind::PlainText => {
+            fs_write(path, media.data.as_ref())
+        }
         CoverMediaKind::PdfDocument => save_pdf_cover(media, path),
-        CoverMediaKind::PlainText => fs_write(path, media.data.as_ref()),
     }
 }
 
@@ -1081,7 +1115,9 @@ fn save_pdf_cover(_media: &CoverMedia, _path: &Path) -> Result<(), AppError> {
 
 fn serialise_cover_to_bytes(media: &CoverMedia) -> Result<Vec<u8>, AppError> {
     match media.kind {
-        CoverMediaKind::PdfDocument | CoverMediaKind::PlainText => Ok(media.data.to_vec()),
+        CoverMediaKind::PdfDocument | CoverMediaKind::PlainText | CoverMediaKind::JpegEncoded => {
+            Ok(media.data.to_vec())
+        }
         _ => {
             let temp_path = std::env::temp_dir().join(format!(
                 "shadowforge-{}.{}",
@@ -1128,7 +1164,7 @@ const fn cover_file_extension(kind: CoverMediaKind) -> &'static str {
     match kind {
         CoverMediaKind::PngImage => "png",
         CoverMediaKind::BmpImage => "bmp",
-        CoverMediaKind::JpegImage => "jpg",
+        CoverMediaKind::JpegImage | CoverMediaKind::JpegEncoded => "jpg",
         CoverMediaKind::GifImage => "gif",
         CoverMediaKind::WavAudio => "wav",
         CoverMediaKind::PdfDocument => "pdf",
@@ -1159,7 +1195,7 @@ fn load_cover(technique: crate::domain::types::StegoTechnique, data: &[u8]) -> C
         crate::domain::types::StegoTechnique::ZeroWidthText => CoverMediaKind::PlainText,
         crate::domain::types::StegoTechnique::PdfContentStream
         | crate::domain::types::StegoTechnique::PdfMetadata => CoverMediaKind::PdfDocument,
-        crate::domain::types::StegoTechnique::DctJpeg => CoverMediaKind::JpegImage,
+        crate::domain::types::StegoTechnique::DctJpeg => CoverMediaKind::JpegEncoded,
         crate::domain::types::StegoTechnique::LsbImage
         | crate::domain::types::StegoTechnique::Palette
         | crate::domain::types::StegoTechnique::CorpusSelection
@@ -1461,7 +1497,9 @@ mod tests {
     #[test]
     fn dct_cover_is_classified_as_jpeg() {
         let cover = load_cover(StegoTechnique::DctJpeg, b"jpeg");
-        assert_eq!(cover.kind, CoverMediaKind::JpegImage);
+        // The DCT technique works in the encoded coefficient domain, so the
+        // cover carries JPEG *file bytes* rather than decoded samples.
+        assert_eq!(cover.kind, CoverMediaKind::JpegEncoded);
     }
 
     #[test]

@@ -76,6 +76,15 @@ pub enum CoverMediaKind {
     BmpImage,
     /// JPEG compressed image.
     JpegImage,
+    /// JPEG file bytes, not decoded to pixels.
+    ///
+    /// Most image kinds carry *decoded* samples, because that is what
+    /// pixel-domain techniques need. DCT-domain techniques need the
+    /// opposite: the encoded entropy stream, because the payload lives in
+    /// the quantised coefficients that only exist in the encoded form.
+    /// [`CoverMediaKind::JpegEncoded`] is the one image kind that carries
+    /// file bytes.
+    JpegEncoded,
     /// GIF animated or static image.
     GifImage,
     /// WAV uncompressed audio.
@@ -204,6 +213,32 @@ impl EmbeddingProfile {
     pub const fn default_adaptive() -> Self {
         Self::Adaptive {
             max_detectability_db: DEFAULT_ADAPTIVE_DETECTABILITY_DB,
+        }
+    }
+
+    /// Return the reason `technique` cannot satisfy this profile, or `None`
+    /// when the combination is supported.
+    ///
+    /// The `CompressionSurvivable` profile promises that the payload can be
+    /// recovered after the target platform recompresses the cover. Only a
+    /// technique whose payload lives in the *encoded* domain can make that
+    /// promise: recompression rebuilds the entropy stream, so a payload held
+    /// in decoded pixel values is destroyed by the very step the profile is
+    /// supposed to survive. DCT-domain embedding is the encoded-domain
+    /// technique, and it survives a recompression that uses the same
+    /// quantisation tables.
+    #[must_use]
+    pub const fn unsupported_technique(&self, technique: StegoTechnique) -> Option<&'static str> {
+        match self {
+            Self::CompressionSurvivable { .. } => match technique {
+                StegoTechnique::DctJpeg => None,
+                _ => Some(
+                    "the compression-survivable profile requires the `dct` technique: \
+only a payload carried in the encoded JPEG coefficient domain can survive \
+the platform recompression that this profile simulates",
+                ),
+            },
+            _ => None,
         }
     }
 }
