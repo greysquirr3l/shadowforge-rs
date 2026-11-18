@@ -9,6 +9,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # CI installs pdfium below, so a pdfium test that cannot run is a failure,
+  # not a skip — otherwise the rasterisation path could go untested.
+  SHADOWFORGE_REQUIRE_PDFIUM: "1"
 
 jobs:
   test:

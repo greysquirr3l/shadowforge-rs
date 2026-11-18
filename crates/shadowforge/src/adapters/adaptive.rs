@@ -448,12 +448,20 @@ impl CompressionSimulator for CompressionSimulatorImpl {
             return Ok(cover);
         }
 
-        // Treat raw data as RGBA8 pixels.
-        let pixels = cover.data.to_vec();
-        let expected_len = (w as usize).saturating_mul(h as usize).saturating_mul(3);
-        if pixels.len() < expected_len {
+        // Cover data is raw RGBA8: four samples per pixel.
+        let expected_len = (w as usize).saturating_mul(h as usize).saturating_mul(4);
+        if cover.data.len() < expected_len {
             return Ok(cover);
         }
+        let rgba = image::RgbaImage::from_raw(w, h, cover.data.to_vec()).ok_or_else(|| {
+            AdaptiveError::CompressionSimFailed {
+                reason: "invalid pixel dimensions".to_string(),
+            }
+        })?;
+        // JPEG has no alpha channel, so drop it per pixel. Reinterpreting the
+        // RGBA bytes as RGB instead would shift every channel and produce a
+        // scrambled simulation that no longer matches what a platform does.
+        let rgb = image::DynamicImage::ImageRgba8(rgba).into_rgb8();
 
         // Encode as JPEG into memory.
         let mut encoded: Vec<u8> = Vec::new();
@@ -461,21 +469,11 @@ impl CompressionSimulator for CompressionSimulatorImpl {
             let mut cursor = Cursor::new(&mut encoded);
             let mut jpeg_encoder =
                 image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
-            image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                w,
-                h,
-                pixels.get(..expected_len).unwrap_or(&[]),
-            )
-            .ok_or_else(|| AdaptiveError::CompressionSimFailed {
-                reason: "invalid pixel dimensions".to_string(),
-            })
-            .and_then(|buf| {
-                jpeg_encoder
-                    .encode(buf.as_raw(), w, h, image::ExtendedColorType::Rgb8)
-                    .map_err(|e| AdaptiveError::CompressionSimFailed {
-                        reason: format!("JPEG encode failed: {e}"),
-                    })
-            })?;
+            jpeg_encoder
+                .encode(rgb.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+                .map_err(|e| AdaptiveError::CompressionSimFailed {
+                    reason: format!("JPEG encode failed: {e}"),
+                })?;
         }
 
         // Decode back.
@@ -483,14 +481,18 @@ impl CompressionSimulator for CompressionSimulatorImpl {
             .map_err(|e| AdaptiveError::CompressionSimFailed {
                 reason: format!("JPEG decode failed: {e}"),
             })?;
-        let rgb = decoded.to_rgb8();
+        // Cover media always carries raw RGBA8 samples, whatever `kind`
+        // says the file format is — the media encoder turns them into the
+        // real file. Handing back RGB samples instead leaves the buffer a
+        // quarter too short for every downstream reader.
+        let rgba = decoded.to_rgba8();
         let mut out_meta = cover.metadata;
         out_meta.insert("width".to_string(), w.to_string());
         out_meta.insert("height".to_string(), h.to_string());
 
         Ok(CoverMedia {
             kind: CoverMediaKind::JpegImage,
-            data: Bytes::from(rgb.into_raw()),
+            data: Bytes::from(rgba.into_raw()),
             metadata: out_meta,
         })
     }
@@ -1007,6 +1009,67 @@ mod tests {
             return;
         };
         assert_eq!(result.data, cover.data);
+    }
+
+    /// The simulated JPEG must show the same colours as the cover.
+    ///
+    /// Cover data is raw RGBA8, four samples per pixel. Reading it as
+    /// RGB8 shifts every channel, so the simulated image is a scrambled
+    /// version of the cover — and a payload embedded against that
+    /// simulation would not survive the real platform's compression, which
+    /// is exactly what this simulator exists to guarantee.
+    #[test]
+    fn compression_simulator_preserves_cover_colours() {
+        let sim = CompressionSimulatorImpl;
+        let (w, h) = (32u32, 32u32);
+
+        let mut img = image::RgbaImage::new(w, h);
+        for (x, y, pixel) in img.enumerate_pixels_mut() {
+            *pixel = image::Rgba([
+                u8::try_from(x * 8 % 256).unwrap_or(0),
+                u8::try_from(y * 8 % 256).unwrap_or(0),
+                64,
+                255,
+            ]);
+        }
+        let mut meta = HashMap::new();
+        meta.insert("width".to_string(), w.to_string());
+        meta.insert("height".to_string(), h.to_string());
+        let expected = img.clone();
+        let cover = CoverMedia {
+            kind: CoverMediaKind::PngImage,
+            data: Bytes::from(img.into_raw()),
+            metadata: meta,
+        };
+
+        let result = sim.simulate(cover, &PlatformProfile::Telegram);
+        let Ok(result) = result else {
+            panic!("simulate failed");
+        };
+        assert_eq!(result.kind, CoverMediaKind::JpegImage);
+
+        // Cover media carries raw RGBA8 samples.
+        assert_eq!(
+            result.data.len(),
+            (w as usize) * (h as usize) * 4,
+            "simulated cover must carry RGBA8 samples"
+        );
+        let Some(decoded) = image::RgbaImage::from_raw(w, h, result.data.to_vec()) else {
+            panic!("simulated cover must be a valid RGBA8 image");
+        };
+
+        for (x, y, pixel) in decoded.enumerate_pixels() {
+            let source = expected.get_pixel(x, y).0;
+            // JPEG is lossy, so allow a small margin per channel.
+            assert!(
+                (i16::from(pixel.0[0]) - i16::from(source[0])).abs() <= 12
+                    && (i16::from(pixel.0[1]) - i16::from(source[1])).abs() <= 12
+                    && (i16::from(pixel.0[2]) - i16::from(source[2])).abs() <= 12,
+                "simulated JPEG pixel ({x}, {y}) is {:?}, expected roughly {:?}",
+                pixel.0,
+                source
+            );
+        }
     }
 
     #[test]
