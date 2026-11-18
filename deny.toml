@@ -18,6 +18,12 @@ version      = 2
 db-path      = "~/.cargo/advisory-db"
 db-urls      = ["https://github.com/rustsec/advisory-db"]
 ignore       = [
+    # RUSTSEC-2026-0543: `chrono` is unmaintained with no fixed version.
+    # It is pulled in transitively by `lopdf` and `pdfium-render`, both of
+    # which we depend on for the PDF bounded context, so it cannot be
+    # removed without dropping PDF support. Its own use is limited to
+    # timestamp formatting for manifests and time-lock puzzles.
+    { id = "RUSTSEC-2026-0543" },
 ]
 unmaintained = "workspace"
 
@@ -33,7 +39,6 @@ allow                = [
     "BSD-3-Clause",
     "ISC",
     "Unicode-3.0",
-    "OpenSSL",
     "Zlib",
     "CC0-1.0",
     "CDLA-Permissive-2.0",
@@ -63,6 +68,4 @@ skip-tree = []
 unknown-registry = "deny"
 unknown-git      = "deny"
 allow-registry   = ["https://github.com/rust-lang/crates.io-index"]
-allow-git        = [
-    "https://github.com/ajrcarey/pdfium-render",  # [patch.crates-io] for c_char E0308 fix until 0.9.3
-]
+allow-git        = []

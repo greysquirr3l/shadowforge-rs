@@ -550,13 +550,17 @@ fn extract_channel_f32(data: &Bytes, width: u32, height: u32, channel: usize) ->
     let npix = (width as usize).saturating_mul(height as usize);
     if data.len() >= npix.saturating_mul(4) {
         // RGBA8
-        data.chunks_exact(4)
+        data.as_chunks::<4>()
+            .0
+            .iter()
             .map(|ch| f32::from(ch.get(channel).copied().unwrap_or(0)))
             .collect()
     } else if data.len() >= npix.saturating_mul(3) {
         // RGB8 — clamp channel index to 0..=2
         let idx = channel.min(2);
-        data.chunks_exact(3)
+        data.as_chunks::<3>()
+            .0
+            .iter()
             .map(|ch| f32::from(ch.get(idx).copied().unwrap_or(0)))
             .collect()
     } else {

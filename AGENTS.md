@@ -14,13 +14,14 @@ structure is intentional: future crates (shadowforge-web, shadowforge-api,
 etc.) add as new members under crates/ without restructuring anything.
 
 Key improvements over the Go version:
-  - PDF is a first-class bounded context (embed/extract, native watermarking,
-    render-to-PNG pipeline, cover-medium via content-stream LSB).
-  - PQC uses ml-kem and ml-dsa (pure Rust NIST finalists) — no CGo, no CIRCL.
-  - All bounded contexts share a single coherent type vocabulary in
-    domain/types.rs — no duplicate types across contexts.
-  - Error handling is total: thiserror throughout, zero panics in non-test code.
-  - All text operations are grapheme-cluster-safe via unicode-segmentation.
+
+- PDF is a first-class bounded context (embed/extract, native watermarking,
+  render-to-PNG pipeline, cover-medium via content-stream LSB).
+- PQC uses ml-kem and ml-dsa (pure Rust NIST finalists) — no CGo, no CIRCL.
+- All bounded contexts share a single coherent type vocabulary in
+  domain/types.rs — no duplicate types across contexts.
+- Error handling is total: thiserror throughout, zero panics in non-test code.
+- All text operations are grapheme-cluster-safe via unicode-segmentation.
 
 Bounded Contexts (all under crates/shadowforge/src/domain/):
   crypto        — ML-KEM-1024, ML-DSA-87, Argon2id, AES-256-GCM, secure zeroing
@@ -49,7 +50,6 @@ Nation-State Countermeasure Bounded Contexts:
   opsec         — Amnesiac mode (zero disk writes), geographic threshold
                   distribution manifests, forensic watermark tripwires
 
-
 ## Setup commands
 
 - Build: `cargo build --workspace`
@@ -68,7 +68,6 @@ Nation-State Countermeasure Bounded Contexts:
 
 - Language: rust
 - Strategy: TDD — write a failing test before any implementation code
-
 
 ## Rules
 
@@ -140,6 +139,10 @@ Nation-State Countermeasure Bounded Contexts:
 
 - Use conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
 - Focus commit messages on user impact, not file counts or line numbers
+
+## GitHub User
+
+Use `@greysquirr3l` for all GitHub mentions, commits, PRs, and issues.
 
 ---
 

@@ -347,11 +347,10 @@ pub fn spectral_detectability_score(
 /// remainder bytes are treated as green-channel samples directly.
 fn green_channel_f32(data: &Bytes) -> Vec<f32> {
     if data.len() >= 4 && data.len().is_multiple_of(4) {
-        data.chunks_exact(4)
-            .filter_map(|ch| match ch {
-                [_, g, _, _] => Some(f32::from(*g)),
-                _ => None,
-            })
+        data.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|ch| f32::from(ch[1]))
             .collect()
     } else {
         data.iter().map(|&b| f32::from(b)).collect()
@@ -429,7 +428,7 @@ fn compute_carrier_snr_drop_db(
             let mag_orig = f64::from(o.norm());
             let mag_stego = f64::from(s.norm());
             if mag_orig > 0.0 && mag_stego > 0.0 {
-                sum += 10.0 * (mag_stego / mag_orig).log10();
+                sum = 10.0f64.mul_add((mag_stego / mag_orig).log10(), sum);
                 count = count.strict_add(1);
             }
         }
@@ -455,18 +454,16 @@ fn compute_sample_pair_asymmetry(orig: &[f32], stego: &[f32]) -> f64 {
 
     let pairs = stego.len() / 2;
     let asym: usize = stego
-        .chunks_exact(2)
-        .filter(|pair| match pair {
-            [a, b] => sample_is_odd(*a) != sample_is_odd(*b),
-            _ => false,
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|pair| sample_is_odd(pair[0]) != sample_is_odd(pair[1]))
         .count();
     let orig_asym: usize = orig
-        .chunks_exact(2)
-        .filter(|pair| match pair {
-            [a, b] => sample_is_odd(*a) != sample_is_odd(*b),
-            _ => false,
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|pair| sample_is_odd(pair[0]) != sample_is_odd(pair[1]))
         .count();
     let pairs_f = match u32::try_from(pairs) {
         Ok(v) if v > 0 => f64::from(v),

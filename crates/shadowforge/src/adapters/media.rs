@@ -248,15 +248,13 @@ impl MediaLoader for AudioMediaLoader {
             })?;
 
         // Convert bytes back to i16 samples
-        for chunk in media.data.chunks_exact(2) {
-            if let Ok(pair) = <[u8; 2]>::try_from(chunk) {
-                let sample = i16::from_le_bytes(pair);
-                writer
-                    .write_sample(sample)
-                    .map_err(|e| MediaError::EncodeFailed {
-                        reason: e.to_string(),
-                    })?;
-            }
+        for pair in media.data.as_chunks::<2>().0 {
+            let sample = i16::from_le_bytes(*pair);
+            writer
+                .write_sample(sample)
+                .map_err(|e| MediaError::EncodeFailed {
+                    reason: e.to_string(),
+                })?;
         }
 
         writer.finalize().map_err(|e| MediaError::EncodeFailed {
