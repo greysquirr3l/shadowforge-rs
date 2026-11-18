@@ -8,6 +8,38 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The DCT carrier layout pooled votes across the spectrum** — the
+  carrier stride permuted the combined block-and-coefficient space, so
+  the repetition copies of one carrier position landed on *different*
+  frequencies. The two-level vote — one majority per position, then a
+  vote among the positions — was therefore pooling votes about unrelated
+  frequencies, which is the thing it exists to prevent. The stride now
+  permutes the block dimension only, and each position keeps a fixed
+  coefficient index across every copy.
+
+  Measured on the production code path, over sixteen photographs
+  re-encoded at four platform qualities with a payload filling the
+  cover's capacity, the fraction of payloads still readable after the
+  platform's recompression rises from 49 of 60 to 56 of 60. The mean bit
+  error rate falls from 2.1% to 0.008%.
+
+  The carrier band was re-measured at the same time and changed from
+  `9, 10, 14, 21, 28, 40, 55, 63` to `26, 28, 34, 37, 41, 44, 50, 52`.
+  That change is worth less than a point of survival rate on its own —
+  the layout was the whole of the fix — but it costs nothing, and it
+  avoids the two most disturbed positions in the spectrum.
+
+- **`deny.toml` did not deny `unsound` advisories** — the setting was
+  absent and the default did not apply, so `cargo deny` reported the
+  lockfile as clean while `cargo audit` flagged the same advisory as
+  unsound. The two tools disagreed about the same lockfile, which is how
+  an unreviewed advisory reaches a release unnoticed. `unsound = "all"`
+  is now stated explicitly, and the one advisory it surfaces (`lru`,
+  unreachable because `reed-solomon-erasure` never calls `pop()`) is
+  waived with that reasoning recorded.
+
 ### Changed
 
 - **Documentation moved from mdBook to an Astro + Starlight site** — the
