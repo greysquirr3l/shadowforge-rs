@@ -41,6 +41,21 @@ fn verify_hmac_tag(hmac_key: &[u8], shard: &Shard) -> Result<bool, CorrectionErr
     Ok(expected.ct_eq(&shard.hmac_tag).into())
 }
 
+/// The size in bytes of each shard produced for `data_len` bytes of input.
+///
+/// This is the one place the shard geometry is defined. The canary shard
+/// has to be the same size as a real shard — it is planted in the same
+/// covers and must be indistinguishable in size from the shards it sits
+/// beside — so it derives its size from here rather than repeating the
+/// arithmetic.
+#[must_use]
+pub fn shard_size_for(data_len: usize, data_shards: u8) -> usize {
+    if data_shards == 0 {
+        return 0;
+    }
+    (data_len.strict_add(usize::from(data_shards).strict_sub(1))) / usize::from(data_shards)
+}
+
 /// Encode data into Reed-Solomon shards with HMAC tags.
 ///
 /// # Errors
@@ -64,10 +79,7 @@ pub fn encode_shards(
     }
 
     let total_shards = data_shards.strict_add(parity_shards);
-    let shard_size = (data
-        .len()
-        .strict_add(usize::from(data_shards).strict_sub(1)))
-        / usize::from(data_shards);
+    let shard_size = shard_size_for(data.len(), data_shards);
 
     // Pad data to fit evenly into data_shards
     let total_size = shard_size.strict_mul(usize::from(data_shards));
