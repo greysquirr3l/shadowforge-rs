@@ -848,9 +848,8 @@ mod tests {
             metadata: std::collections::HashMap::new(),
         };
         match capacity(&png) {
-            Ok(_) => panic!("a PNG cover must be rejected"),
             Err(StegoError::UnsupportedCoverType { .. }) => Ok(()),
-            Err(other) => Err(Box::new(other)),
+            other => Err(format!("a PNG cover must be rejected, got {other:?}").into()),
         }
     }
 
@@ -862,9 +861,8 @@ mod tests {
             metadata: std::collections::HashMap::new(),
         };
         match capacity(&broken) {
-            Ok(_) => panic!("a malformed JPEG must be rejected"),
             Err(StegoError::MalformedCoverData { .. }) => Ok(()),
-            Err(other) => Err(Box::new(other)),
+            other => Err(format!("a malformed JPEG must be rejected, got {other:?}").into()),
         }
     }
 
@@ -875,9 +873,8 @@ mod tests {
         let oversized_len = usize::try_from(capacity.bytes + 1).unwrap_or(usize::MAX);
         let oversized = vec![0u8; oversized_len];
         match embed(source, &Payload::from_bytes(oversized)) {
-            Ok(_) => panic!("an oversized payload must be rejected"),
             Err(StegoError::PayloadTooLarge { .. }) => Ok(()),
-            Err(other) => Err(Box::new(other)),
+            other => Err(format!("an oversized payload must be rejected, got {other:?}").into()),
         }
     }
 
@@ -885,9 +882,8 @@ mod tests {
     fn extraction_from_a_clean_cover_reports_no_payload() -> TestResult {
         let source = cover(TEST_WIDTH, TEST_HEIGHT, 80)?;
         match extract(&source) {
-            Ok(_) => panic!("a clean cover must not yield a payload"),
             Err(StegoError::NoPayloadFound) => Ok(()),
-            Err(other) => Err(Box::new(other)),
+            other => Err(format!("a clean cover must not yield a payload, got {other:?}").into()),
         }
     }
 
@@ -1055,13 +1051,13 @@ mod tests {
         match extract(&recompressed) {
             Ok(recovered) => {
                 assert_eq!(recovered.as_bytes(), payload.as_bytes());
+                Ok(())
             }
-            Err(StegoError::IntegrityCheckFailed { .. }) => {
-                panic!("the carrier band must survive requantisation at quality 75");
-            }
-            Err(other) => return Err(Box::new(other)),
+            other => Err(format!(
+                "the carrier band must survive requantisation at quality 75, got {other:?}"
+            )
+            .into()),
         }
-        Ok(())
     }
 
     #[test]
