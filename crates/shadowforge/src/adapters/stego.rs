@@ -1174,22 +1174,13 @@ mod tests {
 
         // An empty buffer is not a decodable JPEG.
         let result = embedder.embed(cover.clone(), &payload);
-        assert!(matches!(
-            result,
-            Err(StegoError::MalformedCoverData { .. })
-        ));
+        assert!(matches!(result, Err(StegoError::MalformedCoverData { .. })));
 
         let result = embedder.extract(&cover);
-        assert!(matches!(
-            result,
-            Err(StegoError::MalformedCoverData { .. })
-        ));
+        assert!(matches!(result, Err(StegoError::MalformedCoverData { .. })));
 
         let result = embedder.capacity(&cover);
-        assert!(matches!(
-            result,
-            Err(StegoError::MalformedCoverData { .. })
-        ));
+        assert!(matches!(result, Err(StegoError::MalformedCoverData { .. })));
     }
 
     #[test]

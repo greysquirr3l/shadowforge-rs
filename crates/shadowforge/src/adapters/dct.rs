@@ -135,9 +135,9 @@ const HEADER_BITS: usize = MAGIC_BITS + LENGTH_BITS + CHECKSUM_BITS;
 /// `dct-io` stores each block in natural row-major order and applies this
 /// table internally, so the same table is needed here to address slots.
 const ZIGZAG: [usize; 64] = [
-    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27,
-    20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58,
-    59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
+    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20,
+    13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59,
+    52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
 /// Resolve a zig-zag position to the natural coefficient index `dct-io`
@@ -207,12 +207,18 @@ impl FrameHeader {
 
     /// The largest horizontal sampling factor, which sets the MCU width.
     fn h_max(&self) -> usize {
-        self.components().map(|c| usize::from(c.1)).max().unwrap_or(1)
+        self.components()
+            .map(|c| usize::from(c.1))
+            .max()
+            .unwrap_or(1)
     }
 
     /// The largest vertical sampling factor, which sets the MCU height.
     fn v_max(&self) -> usize {
-        self.components().map(|c| usize::from(c.2)).max().unwrap_or(1)
+        self.components()
+            .map(|c| usize::from(c.2))
+            .max()
+            .unwrap_or(1)
     }
 
     /// The id of the luma component: the one sampled most densely.
@@ -253,10 +259,7 @@ fn parse_frame_header(data: &[u8]) -> Option<FrameHeader> {
             i += 2;
             continue;
         }
-        let length = usize::from(u16::from_be_bytes([
-            *data.get(i + 2)?,
-            *data.get(i + 3)?,
-        ]));
+        let length = usize::from(u16::from_be_bytes([*data.get(i + 2)?, *data.get(i + 3)?]));
         if marker == 0xC0 || marker == 0xC1 {
             let height = u16::from_be_bytes([*data.get(i + 5)?, *data.get(i + 6)?]);
             let width = u16::from_be_bytes([*data.get(i + 7)?, *data.get(i + 8)?]);
@@ -297,10 +300,7 @@ struct CarrierMap {
 /// Returns `None` if the file has no baseline frame header, if the luma
 /// component cannot be found, or if the cover is too small to hold a single
 /// block.
-fn carrier_map(
-    data: &[u8],
-    coeffs: &dct_io::JpegCoefficients,
-) -> Option<CarrierMap> {
+fn carrier_map(data: &[u8], coeffs: &dct_io::JpegCoefficients) -> Option<CarrierMap> {
     let header = parse_frame_header(data)?;
     let h_max = header.h_max();
     let v_max = header.v_max();
@@ -526,10 +526,8 @@ fn capacity_bytes(block_count: usize) -> u64 {
 pub fn capacity(cover: &CoverMedia) -> Result<Capacity, StegoError> {
     ensure_jpeg(cover)?;
     let coeffs = read_coefficients(&cover.data)?;
-    let map = carrier_map(&cover.data, &coeffs).ok_or_else(|| {
-        StegoError::MalformedCoverData {
-            reason: "cover has no baseline frame header or no luma blocks".to_string(),
-        }
+    let map = carrier_map(&cover.data, &coeffs).ok_or_else(|| StegoError::MalformedCoverData {
+        reason: "cover has no baseline frame header or no luma blocks".to_string(),
     })?;
     Ok(Capacity {
         bytes: capacity_bytes(map.blocks.len()),
@@ -547,19 +545,14 @@ pub fn embed(cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoEr
     ensure_jpeg(&cover)?;
     let mut coeffs = read_coefficients(&cover.data)?;
 
-    let map = carrier_map(&cover.data, &coeffs).ok_or_else(|| {
-        StegoError::MalformedCoverData {
-            reason: "cover has no baseline frame header or no luma blocks".to_string(),
-        }
+    let map = carrier_map(&cover.data, &coeffs).ok_or_else(|| StegoError::MalformedCoverData {
+        reason: "cover has no baseline frame header or no luma blocks".to_string(),
     })?;
 
     let available = capacity_bytes(map.blocks.len());
     let needed = payload.len() as u64;
     if needed > available {
-        return Err(StegoError::PayloadTooLarge {
-            needed,
-            available,
-        });
+        return Err(StegoError::PayloadTooLarge { needed, available });
     }
 
     let bits = framed_bits(payload.as_bytes());
@@ -608,10 +601,8 @@ pub fn embed(cover: CoverMedia, payload: &Payload) -> Result<CoverMedia, StegoEr
 pub fn extract(stego: &CoverMedia) -> Result<Payload, StegoError> {
     ensure_jpeg(stego)?;
     let coeffs = read_coefficients(&stego.data)?;
-    let map = carrier_map(&stego.data, &coeffs).ok_or_else(|| {
-        StegoError::MalformedCoverData {
-            reason: "stego cover has no baseline frame header or no luma blocks".to_string(),
-        }
+    let map = carrier_map(&stego.data, &coeffs).ok_or_else(|| StegoError::MalformedCoverData {
+        reason: "stego cover has no baseline frame header or no luma blocks".to_string(),
     })?;
     let block_list = &map.blocks;
     let block_count = block_list.len();
@@ -685,11 +676,7 @@ pub fn extract(stego: &CoverMedia) -> Result<Payload, StegoError> {
 
     // Verify the checksum. Recompression can damage a payload rather than
     // destroy it, and a silently damaged payload is worse than none at all.
-    let Some(expected) = read_header_field(
-        &raw_bits,
-        MAGIC_BITS + LENGTH_BITS,
-        HEADER_BITS,
-    ) else {
+    let Some(expected) = read_header_field(&raw_bits, MAGIC_BITS + LENGTH_BITS, HEADER_BITS) else {
         return Err(StegoError::NoPayloadFound);
     };
     if crc32(&bytes) != expected {
@@ -723,11 +710,11 @@ fn write_coefficients(
     original: &[u8],
     coeffs: &dct_io::JpegCoefficients,
 ) -> Result<bytes::Bytes, StegoError> {
-    dct_io::write_coefficients(original, coeffs).map(bytes::Bytes::from).map_err(|e| {
-        StegoError::MalformedCoverData {
+    dct_io::write_coefficients(original, coeffs)
+        .map(bytes::Bytes::from)
+        .map_err(|e| StegoError::MalformedCoverData {
             reason: format!("cannot re-encode JPEG DCT coefficients: {e}"),
-        }
-    })
+        })
 }
 
 #[cfg(test)]
@@ -749,11 +736,7 @@ mod tests {
     /// The carrier set spans four frequency bands, and a cover with no
     /// energy in the high bands would not exercise it. The arithmetic is
     /// integer throughout, so the fixture is exactly reproducible.
-    fn cover_bytes(
-        width: u32,
-        height: u32,
-        quality: u8,
-    ) -> Result<Vec<u8>, image::ImageError> {
+    fn cover_bytes(width: u32, height: u32, quality: u8) -> Result<Vec<u8>, image::ImageError> {
         let mut img = RgbImage::new(width, height);
         let x_scale = 255 / width.max(1);
         let y_scale = 255 / height.max(1);
@@ -785,7 +768,10 @@ mod tests {
 
     /// Re-encode `stego` at `quality`, as a platform that recompresses what
     /// it receives would.
-    fn recompress(stego: &CoverMedia, quality: u8) -> Result<CoverMedia, Box<dyn std::error::Error>> {
+    fn recompress(
+        stego: &CoverMedia,
+        quality: u8,
+    ) -> Result<CoverMedia, Box<dyn std::error::Error>> {
         let decoded =
             image::load_from_memory_with_format(&stego.data, image::ImageFormat::Jpeg)?.to_rgb8();
         let mut out = Vec::new();
@@ -836,7 +822,10 @@ mod tests {
         let source = cover(TEST_WIDTH, TEST_HEIGHT, 85)?;
         let capacity = capacity(&source)?;
         assert_eq!(capacity.technique, StegoTechnique::DctJpeg);
-        assert!(capacity.bytes > 0, "a photo-sized JPEG must hold some payload");
+        assert!(
+            capacity.bytes > 0,
+            "a photo-sized JPEG must hold some payload"
+        );
         Ok(())
     }
 

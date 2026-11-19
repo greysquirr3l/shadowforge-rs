@@ -421,10 +421,7 @@ impl CompressionSimulatorImpl {
     /// quality, and handed back as encoded JPEG bytes. The result stays in
     /// the encoded domain so that a payload embedded in the DCT coefficients
     /// remains extractable after the simulated platform recompression.
-    fn recompress_jpeg_bytes(
-        cover: CoverMedia,
-        quality: u8,
-    ) -> Result<CoverMedia, AdaptiveError> {
+    fn recompress_jpeg_bytes(cover: CoverMedia, quality: u8) -> Result<CoverMedia, AdaptiveError> {
         let decoded = image::load_from_memory_with_format(&cover.data, image::ImageFormat::Jpeg)
             .map_err(|e| AdaptiveError::CompressionSimFailed {
                 reason: format!("JPEG decode failed: {e}"),
@@ -454,7 +451,6 @@ impl CompressionSimulatorImpl {
             metadata: out_meta,
         })
     }
-
 }
 
 impl CompressionSimulator for CompressionSimulatorImpl {
