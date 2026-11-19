@@ -12,18 +12,33 @@ cargo fmt --all
 
 ## Lints
 
-Clippy is configured at maximum strictness in `Cargo.toml`:
+Clippy is configured at maximum strictness in the workspace's `[lints.clippy]`
+table in `Cargo.toml`. Cargo applies that table to every `cargo clippy`, so
+the policy holds in CI, in a contributor's clone, and in the editor alike —
+there is no command line to pass and no second copy to drift.
 
-- `clippy::pedantic` — enabled
+The groups `clippy::all`, `clippy::pedantic`, `clippy::nursery`,
+`clippy::cargo` and `clippy::perf` are enabled, and these are denied:
+
+- `clippy::panic` — **denied**, in tests as well as production code. A panic
+  in a test aborts the whole test binary and discards the value that did not
+  match; report the mismatch instead.
 - `clippy::expect_used` — **denied** (no `.expect()` outside tests)
 - `clippy::unwrap_used` — **denied** (no `.unwrap()` outside tests)
 - `clippy::indexing_slicing` — **denied** (use `.get()` with explicit handling)
+- `clippy::cast_ptr_alignment` — **denied**
+- `clippy::suspicious` — **denied**
 
 Run the full lint check:
 
 ```bash
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-features --all-targets -- -D warnings
 ```
+
+`--all-targets` matters. Without it the tests are not linted, so a panic or
+an unwrap in a test would reach the default branch unchecked.
+
+`cargo l` is an alias for exactly that command.
 
 ## Lint Suppression
 
