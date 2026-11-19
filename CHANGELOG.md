@@ -8,7 +8,44 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **The canary tripwire can now report** — the canary was an (N+1)th
+  shard with no way to tell anyone it had been picked up: `check_canary`
+  was a stub returning `false`, the notifier did not exist, and the
+  service was constructed with hardcoded shard parameters that had
+  nothing to do with the distribution it sat in. The notifier is now a
+  port (`CanaryNotifier`) with an HTTPS adapter, the shard geometry is
+  derived from the distribution that was actually made, and the
+  `shadowforge canary {check,status,mark-accessed}` subcommands put the
+  whole workflow on the command line.
+
+  The notification URL is the alarm: when a party who does not know what
+  the canary is picks it up, the tooling around it reaches that URL, and
+  the fact that it was reached is the notification. Only `https://` is
+  accepted — the notification says a distribution was compromised, so it
+  must not travel in clear text, and a `file://` or `http://` URL would be
+  a way to make the tool read local files or hit internal services.
+
 ### Fixed
+
+- **The canary was never detected** — detection compared the canary
+  marker over the whole payload, and the marker is a 32-byte SHA-256
+  while the shard it was planted in was 12 bytes long. The comparison
+  therefore failed on every real canary, and `check_canary` reported
+  "not the canary" for the canary itself. The comparison now runs over
+  the bytes that are actually present, so a truncated canary — the case a
+  party who extracted only part of the payload holds — is still
+  identified.
+
+- **The canary destroyed a real shard** — `embed_canary` was given the
+  already-embedded covers and overwrote the first one with the canary.
+  That silently removed a shard from the distribution, quietly reducing
+  its redundancy from K-of-N to K-of-(N-1) with no error and no warning.
+  The canary is now planted in a cover of its own, reserved before the
+  distribution is made, and that cover is written out separately rather
+  than into the archive — it is planted in a honeypot location, so
+  shipping it alongside the real shards would defeat the point.
 
 - **The DCT carrier layout pooled votes across the spectrum** — the
   carrier stride permuted the combined block-and-coefficient space, so

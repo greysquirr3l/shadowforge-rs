@@ -24,7 +24,8 @@ shadowforge embed-distributed \
 | `--parity-shards` | No | 2 | Number of parity shards |
 | `--profile` | No | `standard` | Embedding profile |
 | `--platform` | No | | Target platform (for `survivable`) |
-| `--canary` | No | | Inject a canary shard for tamper detection |
+| `--canary` | No | | Plant a canary shard for tamper detection |
+| `--canary-notify-url` | No | | HTTPS URL the canary tripwire reports to |
 | `--geo-manifest` | No | | Geographic distribution manifest (TOML) |
 
 ## Examples
@@ -37,12 +38,13 @@ shadowforge embed-distributed \
   --output-archive distributed.zip \
   --technique lsb
 
-# With canary shard
+# With canary shard (needs one more cover than the shards alone)
 shadowforge embed-distributed \
   --input secret.txt \
   --covers "covers/*.png" \
   --output-archive distributed.zip \
-  --technique lsb --canary
+  --technique lsb --canary \
+  --canary-notify-url https://example.com/canary
 
 # Geographic distribution
 shadowforge embed-distributed \
@@ -61,3 +63,17 @@ shadowforge embed-distributed \
 4. All stego covers are packed into the output archive.
 
 Recovery requires **any** `data-shards` of the total shards. With the default 3+2 configuration, any 3 of 5 shards reconstruct the original payload.
+
+## The Canary
+
+`--canary` plants one extra shard, which needs a cover of its own. The cover is reserved before the distribution is made, so the shard count is unchanged and no real shard is overwritten.
+
+Three files come out:
+
+| File | What it is |
+|------|------------|
+| `distributed.zip` | The real shards. The canary is not in it. |
+| `distributed.canary-cover.png` | The canary. Plant it in a honeypot location. |
+| `distributed.canary` | The canary's metadata: its ID, marker, and notification URL. |
+
+The canary cannot take part in reconstruction — it claims an index one beyond the distribution's shard count — so it costs the distribution no redundancy. See [canary](/threats/legal-pressure/) for the full workflow.

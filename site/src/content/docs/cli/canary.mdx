@@ -1,0 +1,78 @@
+---
+title: "canary"
+description: "Identify the canary shard and fire the tripwire that reports a compromised distribution."
+---
+Identify the canary shard and fire the tripwire that reports a compromised distribution.
+
+A canary is an extra shard planted in a honeypot location. It cannot take part in reconstruction, so it costs the distribution no redundancy, but it carries a marker that identifies the payload as yours.
+
+## Usage
+
+```bash
+shadowforge canary <COMMAND>
+```
+
+## Subcommands
+
+### check
+
+Report whether a recovered payload is the canary, and report the compromise.
+
+```bash
+shadowforge canary check \
+  --canary <FILE> --payload <FILE> [--offline]
+```
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--canary` | Yes | Canary metadata file (the `.canary` file) |
+| `--payload` | Yes | The payload you recovered |
+| `--offline` | No | Identify the canary without contacting the endpoint |
+
+Without `--offline`, a positive match reaches the notification URL. That request *is* the alarm.
+
+### status
+
+Ask whether the canary's notification endpoint is answering.
+
+```bash
+shadowforge canary status --canary <FILE>
+```
+
+This asks the endpoint whether it is live and able to record a hit. Whether it has actually recorded one is the endpoint's own record — no generic HTTP request can answer that.
+
+### mark-accessed
+
+Record that the canary was accessed, by hand.
+
+```bash
+shadowforge canary mark-accessed --canary <FILE> [--note <TEXT>]
+```
+
+Writes an append-only JSONL log beside the canary metadata, for when you find out by hand rather than by notification.
+
+## Examples
+
+```bash
+# A seized cover was recovered — is it the canary?
+shadowforge canary check --canary distributed.canary --payload seized.bin
+
+# Identify without touching the network
+shadowforge canary check --canary distributed.canary --payload seized.bin --offline
+
+# Note the access in the log
+shadowforge canary mark-accessed \
+  --canary distributed.canary --note "seized by agency warrant"
+```
+
+## The Notification URL
+
+The endpoint is set when the distribution is made:
+
+```bash
+shadowforge embed-distributed ... --canary --canary-notify-url https://example.com/canary
+```
+
+Only `https://` is accepted — the notification says a distribution was compromised, so it must not travel in clear text, and a `file://` or `http://` URL would be a way to make the tool read local files or hit internal services.
+
+The canary is inert data: it cannot make a network request on its own. What it does is carry a URL. When a party who does not know what the canary is picks it up, the tooling around it reaches that URL, and the fact that it was reached is the alarm.

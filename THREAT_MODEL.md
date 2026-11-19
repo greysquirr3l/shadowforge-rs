@@ -136,10 +136,14 @@ shards distributed across multiple countries. Legal compulsion via MLAT
 - K-of-N by design: Even without geographic distribution, reconstruction
   requires obtaining `K` of `N` shards. Shard holders in different countries
   each hold only a partial, useless fragment.
-- `CanaryService`: An (N+1)th canary shard in a honeypot location. If an
-  adversary attempts to use it for reconstruction (which will fail), the
-  journalist is notified via a configurable URL — early warning that the
-  distribution has been compromised.
+- `CanaryService`: An (N+1)th canary shard in a honeypot location. It cannot
+  take part in reconstruction — it claims a shard index beyond the
+  distribution's count — so it costs the distribution no redundancy. If the
+  canary is picked up, the tooling around it reaches a configurable HTTPS
+  URL, and the fact that it was reached is the notification: early warning
+  that the distribution has been compromised. The canary carries a marker
+  derived from its ID, so an extracted payload can be identified as the
+  canary.
 
 **Residual risk**: MLAT requests, while slow, are real. For communications
 requiring years of protection, consider that jurisdictions may change their

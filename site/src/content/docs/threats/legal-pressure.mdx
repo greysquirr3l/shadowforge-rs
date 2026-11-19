@@ -23,14 +23,44 @@ No single jurisdiction's legal authority can compel disclosure of enough shards.
 
 ### Canary Shards
 
-Inject tripwire shards into the distribution. If a compromised shard is accessed, the canary triggers, alerting the distribution network.
+A canary is an extra shard, planted in a honeypot location that an adversary is likely to seize. It cannot take part in reconstruction, so it costs the distribution nothing, but it carries a marker that identifies the payload as yours.
+
+The canary needs a cover of its own. It is reserved before the distribution is made, so the shard count stays the same and no real shard is overwritten.
 
 ```bash
 shadowforge embed-distributed \
   --input secret.txt --covers "covers/*.png" \
   --output-archive distributed.zip \
-  --technique lsb --canary
+  --technique lsb --canary \
+  --canary-notify-url https://example.com/canary
 ```
+
+This writes three things:
+
+| File | What it is |
+| --- | --- |
+| `distributed.zip` | The real shards. The canary is **not** in it. |
+| `distributed.canary-cover.png` | The canary. Plant it somewhere tempting — a laptop, a cloud share, a courier pouch. |
+| `distributed.canary` | The canary's metadata: its ID, the marker, and the notification URL. |
+
+The notification URL is where the tripwire reports. It must be HTTPS. When the canary is picked up and the tooling around it reaches that URL, the fact that it was reached is the alarm.
+
+Checking the canary takes the payload you recovered and the canary metadata:
+
+```bash
+shadowforge canary check --canary distributed.canary --payload recovered.bin
+```
+
+If the payload is the canary, the check reports the compromise and reaches the notification URL. Add `--offline` to identify it without contacting anything.
+
+Two more subcommands round out the workflow:
+
+```bash
+shadowforge canary status --canary distributed.canary
+shadowforge canary mark-accessed --canary distributed.canary --note "seized by X"
+```
+
+`status` asks the endpoint whether it is answering — whether it has *recorded* a hit is the endpoint's own record. `mark-accessed` writes an append-only log beside the canary metadata, for when you find out by hand rather than by notification.
 
 ## Residual Risk
 
