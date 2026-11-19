@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::domain::errors::{
     AdaptiveError, AnalysisError, ArchiveError, CanaryError, CorpusError, CorrectionError,
@@ -15,11 +16,11 @@ use crate::domain::errors::{
     ScrubberError, StegoError, TimeLockError,
 };
 use crate::domain::ports::{
-    AdaptiveOptimiser, AmnesiaPipeline, ArchiveHandler, CanaryService as CanaryServicePort,
-    CapacityAnalyser, CompressionSimulator, CorpusIndex, CoverProfileMatcher, DeadDropEncoder,
-    DeniableEmbedder, Distributor, EmbedTechnique, Encryptor, ExtractTechnique,
-    ForensicWatermarker, GeographicDistributor, PanicWiper, Reconstructor, Signer, StyloScrubber,
-    SymmetricCipher, TimeLockService as TimeLockServicePort,
+    AdaptiveOptimiser, AmnesiaPipeline, ArchiveHandler, CanaryNotifier,
+    CanaryService as CanaryServicePort, CapacityAnalyser, CompressionSimulator, CorpusIndex,
+    CoverProfileMatcher, DeadDropEncoder, DeniableEmbedder, Distributor, EmbedTechnique, Encryptor,
+    ExtractTechnique, ForensicWatermarker, GeographicDistributor, PanicWiper, Reconstructor,
+    Signer, StyloScrubber, SymmetricCipher, TimeLockService as TimeLockServicePort,
 };
 use crate::domain::types::{
     AnalysisReport, ArchiveFormat, CanaryShard, CorpusEntry, CoverMedia, DeniableKeySet,
@@ -548,15 +549,65 @@ impl CanaryShardService {
     /// Returns [`AppError::Canary`] on failure.
     pub fn embed_canary(
         covers: Vec<CoverMedia>,
+        canary_cover: CoverMedia,
         embedder: &dyn EmbedTechnique,
         canary: &dyn CanaryServicePort,
-    ) -> Result<(Vec<CoverMedia>, CanaryShard), AppError> {
-        Ok(canary.embed_canary(covers, embedder)?)
+        notify_url: Option<String>,
+    ) -> Result<(Vec<CoverMedia>, CoverMedia, CanaryShard), AppError> {
+        Ok(canary.embed_canary(covers, canary_cover, embedder, notify_url)?)
     }
 
-    /// Check whether a canary has been accessed.
-    pub fn check_canary(shard: &CanaryShard, canary: &dyn CanaryServicePort) -> bool {
-        canary.check_canary(shard)
+    /// Check whether a recovered payload is the canary.
+    pub fn check_canary(payload: &[u8], canary_id: Uuid, canary: &dyn CanaryServicePort) -> bool {
+        canary.check_canary(payload, canary_id)
+    }
+
+    /// Fire the tripwire.
+    ///
+    /// `payload` is what was recovered from a cover. If it is the canary,
+    /// the notification endpoint is told, and the answer is `true` — that
+    /// is the alarm.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Canary`] if the notification could not be
+    /// delivered, or if the canary has no notification endpoint and one
+    /// was required.
+    pub fn fire_tripwire(
+        payload: &[u8],
+        canary_shard: &CanaryShard,
+        canary: &dyn CanaryServicePort,
+        notifier: &dyn CanaryNotifier,
+    ) -> Result<bool, AppError> {
+        if !canary.check_canary(payload, canary_shard.canary_id) {
+            return Ok(false);
+        }
+        let url = canary_shard.notify_url.as_deref().ok_or_else(|| {
+            AppError::Canary(CanaryError::NotificationFailed {
+                reason: "this canary has no notification endpoint, so the tripwire \
+                         cannot report; check it by hand"
+                    .into(),
+            })
+        })?;
+        notifier.notify(url)?;
+        Ok(true)
+    }
+
+    /// Ask whether the canary's endpoint has already been reached.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Canary`] if the endpoint could not be reached.
+    pub fn tripwire_armed(
+        canary_shard: &CanaryShard,
+        notifier: &dyn CanaryNotifier,
+    ) -> Result<bool, AppError> {
+        let url = canary_shard.notify_url.as_deref().ok_or_else(|| {
+            AppError::Canary(CanaryError::NotificationFailed {
+                reason: "this canary has no notification endpoint, so it cannot be \
+                         checked remotely"
+                    .into(),
+            })
+        })?;
+        Ok(notifier.was_notified(url)?)
     }
 }
 
@@ -1392,8 +1443,10 @@ mod tests {
         fn embed_canary(
             &self,
             covers: Vec<CoverMedia>,
+            canary_cover: CoverMedia,
             _embedder: &dyn EmbedTechnique,
-        ) -> Result<(Vec<CoverMedia>, CanaryShard), CanaryError> {
+            _notify_url: Option<String>,
+        ) -> Result<(Vec<CoverMedia>, CoverMedia, CanaryShard), CanaryError> {
             let shard = CanaryShard {
                 shard: Shard {
                     index: 99,
@@ -1404,10 +1457,10 @@ mod tests {
                 canary_id: Uuid::new_v4(),
                 notify_url: Some("https://example.com/canary".into()),
             };
-            Ok((covers, shard))
+            Ok((covers, canary_cover, shard))
         }
 
-        fn check_canary(&self, _shard: &CanaryShard) -> bool {
+        fn check_canary(&self, _payload: &[u8], _canary_id: Uuid) -> bool {
             false
         }
     }
@@ -1415,12 +1468,173 @@ mod tests {
     #[test]
     fn canary_shard_service_embed_and_check() -> TestResult {
         let covers = vec![make_cover(64)];
+        let canary_cover = make_cover(64);
         let embedder = MockEmbedder;
         let canary = MockCanaryService;
-        let (result_covers, shard) = CanaryShardService::embed_canary(covers, &embedder, &canary)?;
+        let (result_covers, _returned_canary_cover, shard) =
+            CanaryShardService::embed_canary(covers, canary_cover, &embedder, &canary, None)?;
         assert_eq!(result_covers.len(), 1);
         assert_eq!(shard.shard.index, 99);
-        assert!(!CanaryShardService::check_canary(&shard, &canary));
+        assert!(!CanaryShardService::check_canary(
+            &[0u8; 16],
+            shard.canary_id,
+            &canary
+        ));
+        Ok(())
+    }
+
+    /// A notifier that records what it was asked to do.
+    struct MockNotifier {
+        notified: std::cell::RefCell<Vec<String>>,
+        reached: bool,
+    }
+
+    impl CanaryNotifier for MockNotifier {
+        fn notify(&self, url: &str) -> Result<(), CanaryError> {
+            self.notified.borrow_mut().push(url.to_owned());
+            Ok(())
+        }
+
+        fn was_notified(&self, _url: &str) -> Result<bool, CanaryError> {
+            Ok(self.reached)
+        }
+    }
+
+    /// A canary service that recognises a fixed marker payload.
+    struct RecognisingCanaryService {
+        marker: Vec<u8>,
+    }
+
+    impl CanaryServicePort for RecognisingCanaryService {
+        fn embed_canary(
+            &self,
+            covers: Vec<CoverMedia>,
+            canary_cover: CoverMedia,
+            _embedder: &dyn EmbedTechnique,
+            _notify_url: Option<String>,
+        ) -> Result<(Vec<CoverMedia>, CoverMedia, CanaryShard), CanaryError> {
+            let shard = CanaryShard {
+                shard: Shard {
+                    index: 99,
+                    total: 100,
+                    data: self.marker.clone(),
+                    hmac_tag: [0u8; 32],
+                },
+                canary_id: Uuid::new_v4(),
+                notify_url: Some("https://example.com/canary".into()),
+            };
+            Ok((covers, canary_cover, shard))
+        }
+
+        fn check_canary(&self, payload: &[u8], _canary_id: Uuid) -> bool {
+            payload == self.marker
+        }
+    }
+
+    #[test]
+    fn fire_tripwire_notifies_when_the_payload_is_the_canary() -> TestResult {
+        let marker = b"the-canary-marker".to_vec();
+        let service = RecognisingCanaryService {
+            marker: marker.clone(),
+        };
+        let notifier = MockNotifier {
+            notified: std::cell::RefCell::new(Vec::new()),
+            reached: false,
+        };
+        let shard = CanaryShard {
+            shard: Shard {
+                index: 99,
+                total: 100,
+                data: marker.clone(),
+                hmac_tag: [0u8; 32],
+            },
+            canary_id: Uuid::new_v4(),
+            notify_url: Some("https://example.com/canary".into()),
+        };
+
+        let fired = CanaryShardService::fire_tripwire(&marker, &shard, &service, &notifier)?;
+
+        assert!(fired);
+        assert_eq!(
+            notifier.notified.borrow().as_slice(),
+            ["https://example.com/canary"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fire_tripwire_does_not_notify_for_another_payload() -> TestResult {
+        let service = RecognisingCanaryService {
+            marker: b"the-canary-marker".to_vec(),
+        };
+        let notifier = MockNotifier {
+            notified: std::cell::RefCell::new(Vec::new()),
+            reached: false,
+        };
+        let shard = CanaryShard {
+            shard: Shard {
+                index: 99,
+                total: 100,
+                data: b"the-canary-marker".to_vec(),
+                hmac_tag: [0u8; 32],
+            },
+            canary_id: Uuid::new_v4(),
+            notify_url: Some("https://example.com/canary".into()),
+        };
+
+        let fired =
+            CanaryShardService::fire_tripwire(b"some other payload", &shard, &service, &notifier)?;
+
+        assert!(!fired);
+        assert!(notifier.notified.borrow().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn fire_tripwire_without_an_endpoint_is_an_error() {
+        let marker = b"the-canary-marker".to_vec();
+        let service = RecognisingCanaryService {
+            marker: marker.clone(),
+        };
+        let notifier = MockNotifier {
+            notified: std::cell::RefCell::new(Vec::new()),
+            reached: false,
+        };
+        let shard = CanaryShard {
+            shard: Shard {
+                index: 99,
+                total: 100,
+                data: marker.clone(),
+                hmac_tag: [0u8; 32],
+            },
+            canary_id: Uuid::new_v4(),
+            notify_url: None,
+        };
+
+        let result = CanaryShardService::fire_tripwire(&marker, &shard, &service, &notifier);
+
+        assert!(result.is_err());
+        assert!(notifier.notified.borrow().is_empty());
+    }
+
+    #[test]
+    fn tripwire_armed_reports_the_endpoint_state() -> TestResult {
+        let shard = CanaryShard {
+            shard: Shard {
+                index: 99,
+                total: 100,
+                data: vec![0u8; 16],
+                hmac_tag: [0u8; 32],
+            },
+            canary_id: Uuid::new_v4(),
+            notify_url: Some("https://example.com/canary".into()),
+        };
+        let notifier = MockNotifier {
+            notified: std::cell::RefCell::new(Vec::new()),
+            reached: true,
+        };
+
+        assert!(CanaryShardService::tripwire_armed(&shard, &notifier)?);
         Ok(())
     }
 

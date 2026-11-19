@@ -2,7 +2,7 @@
 
 use uuid::Uuid;
 
-use crate::domain::canary::{generate_canary_shard, is_canary_shard};
+use crate::domain::canary::{generate_canary_shard, is_canary_payload};
 use crate::domain::errors::CanaryError;
 use crate::domain::ports::{CanaryService, EmbedTechnique};
 use crate::domain::types::{CanaryShard, CoverMedia, Payload};
@@ -32,7 +32,7 @@ impl CanaryServiceImpl {
     /// Check whether a shard matches the canary marker for a given ID.
     #[must_use]
     pub fn verify_canary(shard: &crate::domain::types::Shard, canary_id: Uuid) -> bool {
-        is_canary_shard(shard, canary_id)
+        crate::domain::canary::is_canary_shard(shard, canary_id)
     }
 }
 
@@ -40,67 +40,94 @@ impl CanaryService for CanaryServiceImpl {
     fn embed_canary(
         &self,
         covers: Vec<CoverMedia>,
+        canary_cover: CoverMedia,
         embedder: &dyn EmbedTechnique,
-    ) -> Result<(Vec<CoverMedia>, CanaryShard), CanaryError> {
+        notify_url: Option<String>,
+    ) -> Result<(Vec<CoverMedia>, CoverMedia, CanaryShard), CanaryError> {
         if covers.is_empty() {
             return Err(CanaryError::NoCovers);
         }
 
+        // A canary in a shard shorter than the marker cannot be told apart
+        // from an arbitrary payload, so it would be a tripwire that never
+        // fires. Better to say so than to plant one.
+        if self.shard_size < crate::domain::canary::min_canary_bytes() {
+            return Err(CanaryError::ShardTooSmall {
+                shard_size: self.shard_size,
+                minimum: crate::domain::canary::min_canary_bytes(),
+            });
+        }
+
+        // A notification URL that cannot be reached would silently never
+        // report, so it is rejected at setup rather than at tripwire time.
+        if let Some(url) = &notify_url {
+            validate_notify_url(url)?;
+        }
+
         let canary_id = Uuid::new_v4();
-        let canary = generate_canary_shard(canary_id, self.shard_size, self.total_shards, None);
+        let canary =
+            generate_canary_shard(canary_id, self.shard_size, self.total_shards, notify_url);
 
         // Serialize canary shard data as the payload to embed
         let canary_payload = Payload::from_bytes(canary.shard.data.clone());
 
-        // Find first cover with enough capacity and embed
-        let mut result_covers = Vec::with_capacity(covers.len());
-        let mut placed = false;
-
-        for cover in covers {
-            if !placed
-                && let Ok(cap) = embedder.capacity(&cover)
-                && cap.bytes >= canary_payload.as_bytes().len() as u64
-            {
-                if let Ok(stego_cover) = embedder.embed(cover, &canary_payload) {
-                    result_covers.push(stego_cover);
-                    placed = true;
-                    continue;
-                }
-                // embed() consumed cover on failure — it's gone, move on
-                continue;
-            }
-            result_covers.push(cover);
-        }
-
-        if !placed {
+        // The canary goes into its own cover. It is an (N+1)th shard, so
+        // planting it on top of a real shard would destroy that shard and
+        // quietly reduce the distribution's redundancy.
+        let capacity = embedder
+            .capacity(&canary_cover)
+            .map_err(|source| CanaryError::EmbedFailed { source })?;
+        if capacity.bytes < canary_payload.as_bytes().len() as u64 {
             return Err(CanaryError::EmbedFailed {
                 source: crate::domain::errors::StegoError::PayloadTooLarge {
-                    available: 0,
+                    available: capacity.bytes,
                     needed: canary_payload.as_bytes().len() as u64,
                 },
             });
         }
 
-        Ok((result_covers, canary))
+        let stego_canary_cover = embedder
+            .embed(canary_cover, &canary_payload)
+            .map_err(|source| CanaryError::EmbedFailed { source })?;
+
+        Ok((covers, stego_canary_cover, canary))
     }
 
-    fn check_canary(&self, shard: &CanaryShard) -> bool {
-        // If no notify URL is set, manual check is required
-        let Some(url) = &shard.notify_url else {
-            return false;
-        };
-
-        // Validate the URL to prevent SSRF — only allow https scheme
-        if !url.starts_with("https://") {
-            return false;
-        }
-
-        // TODO(T34): Wire up HTTP HEAD request via a network port trait.
-        // For now, return false (manual check mode).
-        // The CLI should provide a way to manually mark canaries as accessed.
-        let _ = url;
-        false
+    fn check_canary(&self, payload: &[u8], canary_id: Uuid) -> bool {
+        is_canary_payload(payload, canary_id)
     }
+}
+
+/// Reject a notification URL that is not HTTPS.
+///
+/// The canary notification says that a distribution was compromised. It
+/// must not travel in clear text, and a URL that is not HTTPS could point
+/// at a local file or an internal service.
+fn validate_notify_url(url: &str) -> Result<(), CanaryError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(CanaryError::InvalidNotifyUrl {
+            reason: "the URL is empty".into(),
+        });
+    }
+    if !trimmed.starts_with("https://") {
+        let scheme = trimmed.split_once("://").map_or("(none)", |(s, _)| s);
+        return Err(CanaryError::InvalidNotifyUrl {
+            reason: format!("only https:// URLs are accepted, got scheme {scheme:?}"),
+        });
+    }
+    let host = trimmed
+        .strip_prefix("https://")
+        .unwrap_or_default()
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    if host.is_empty() {
+        return Err(CanaryError::InvalidNotifyUrl {
+            reason: "the URL has no host".into(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -167,12 +194,56 @@ mod tests {
         };
         let covers = vec![make_cover()];
 
-        let (result_covers, canary) = service.embed_canary(covers, &embedder)?;
+        let (result_covers, canary_cover, canary) =
+            service.embed_canary(covers, make_cover(), &embedder, None)?;
 
         assert_eq!(result_covers.len(), 1);
         assert_eq!(canary.shard.data.len(), 64);
         assert_eq!(canary.shard.index, 5); // total_shards = 5, so canary index = 5
+        // The canary went into its own cover.
+        assert_ne!(canary_cover.data, Bytes::from(vec![0u8; 1024]));
         Ok(())
+    }
+
+    #[test]
+    fn embed_canary_does_not_modify_the_distribution_covers() -> TestResult {
+        let service = CanaryServiceImpl::new(64, 5);
+        let embedder = MockEmbedder {
+            capacity_bytes: 1024,
+            should_fail: false,
+        };
+        let original = make_cover();
+        let original_data = original.data.clone();
+        let covers = vec![original];
+
+        let (result_covers, _canary_cover, _canary) =
+            service.embed_canary(covers, make_cover(), &embedder, None)?;
+
+        // The real shard's cover must be untouched — the canary is an
+        // (N+1)th shard, not a replacement for one of the N.
+        assert_eq!(
+            result_covers.first().ok_or("index out of bounds")?.data,
+            original_data
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn embed_canary_fails_when_the_shards_are_too_short_to_identify() {
+        // A canary in a shard this short could not be told apart from an
+        // arbitrary payload, so it is refused rather than planted.
+        let service = CanaryServiceImpl::new(4, 5);
+        let embedder = MockEmbedder {
+            capacity_bytes: 1024,
+            should_fail: false,
+        };
+
+        let result = service.embed_canary(vec![make_cover()], make_cover(), &embedder, None);
+
+        assert!(matches!(
+            result,
+            Err(CanaryError::ShardTooSmall { shard_size: 4, .. })
+        ));
     }
 
     #[test]
@@ -183,12 +254,12 @@ mod tests {
             should_fail: false,
         };
 
-        let result = service.embed_canary(vec![], &embedder);
+        let result = service.embed_canary(vec![], make_cover(), &embedder, None);
         assert!(matches!(result, Err(CanaryError::NoCovers)));
     }
 
     #[test]
-    fn embed_canary_fails_when_no_cover_has_capacity() {
+    fn embed_canary_fails_when_the_canary_cover_has_no_capacity() {
         let service = CanaryServiceImpl::new(64, 5);
         let embedder = MockEmbedder {
             capacity_bytes: 0,
@@ -196,81 +267,65 @@ mod tests {
         };
         let covers = vec![make_cover()];
 
-        let result = service.embed_canary(covers, &embedder);
+        let result = service.embed_canary(covers, make_cover(), &embedder, None);
         assert!(matches!(result, Err(CanaryError::EmbedFailed { .. })));
     }
 
     #[test]
-    fn embed_canary_skips_failing_cover_tries_next() -> TestResult {
-        let service = CanaryServiceImpl::new(64, 5);
-        // First cover will fail embedding, second should succeed
-        let embedder = MockEmbedder {
-            capacity_bytes: 1024,
-            should_fail: false,
-        };
-        let covers = vec![make_cover(), make_cover()];
-
-        let (result_covers, canary) = service.embed_canary(covers, &embedder)?;
-
-        assert_eq!(result_covers.len(), 2);
-        assert!(!canary.shard.data.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn canary_shard_not_in_original_covers() -> TestResult {
+    fn embed_canary_rejects_a_non_https_notify_url() {
         let service = CanaryServiceImpl::new(64, 5);
         let embedder = MockEmbedder {
             capacity_bytes: 1024,
             should_fail: false,
         };
-        let original_cover = make_cover();
-        let original_data = original_cover.data.clone();
-        let covers = vec![original_cover];
+        let covers = vec![make_cover()];
 
-        let (result_covers, _canary) = service.embed_canary(covers, &embedder)?;
-
-        // Modified cover should differ from original
-        assert_ne!(
-            result_covers.first().ok_or("index out of bounds")?.data,
-            original_data
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn check_canary_returns_false_without_notify_url() {
-        let service = CanaryServiceImpl::new(64, 5);
-        let canary = generate_canary_shard(Uuid::new_v4(), 64, 5, None);
-
-        assert!(!service.check_canary(&canary));
-    }
-
-    #[test]
-    fn check_canary_returns_false_for_non_https_url() {
-        let service = CanaryServiceImpl::new(64, 5);
-        let canary = generate_canary_shard(
-            Uuid::new_v4(),
-            64,
-            5,
+        let result = service.embed_canary(
+            covers,
+            make_cover(),
+            &embedder,
             Some("http://insecure.example.com/canary".to_owned()),
         );
-
-        assert!(!service.check_canary(&canary));
+        assert!(matches!(result, Err(CanaryError::InvalidNotifyUrl { .. })));
     }
 
     #[test]
-    fn check_canary_returns_false_for_unreachable_url() {
+    fn embed_canary_accepts_an_https_notify_url() -> TestResult {
         let service = CanaryServiceImpl::new(64, 5);
-        let canary = generate_canary_shard(
-            Uuid::new_v4(),
-            64,
-            5,
-            Some("https://nonexistent.example.invalid/canary".to_owned()),
-        );
+        let embedder = MockEmbedder {
+            capacity_bytes: 1024,
+            should_fail: false,
+        };
+        let covers = vec![make_cover()];
 
-        // Should return false (network port not wired yet)
-        assert!(!service.check_canary(&canary));
+        let (_covers, _canary_cover, canary) = service.embed_canary(
+            covers,
+            make_cover(),
+            &embedder,
+            Some("https://example.com/canary".to_owned()),
+        )?;
+        assert_eq!(
+            canary.notify_url.as_deref(),
+            Some("https://example.com/canary")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn check_canary_identifies_the_canary_payload() {
+        let service = CanaryServiceImpl::new(64, 5);
+        let canary_id = Uuid::new_v4();
+        let canary = generate_canary_shard(canary_id, 64, 5, None);
+
+        assert!(service.check_canary(&canary.shard.data, canary_id));
+    }
+
+    #[test]
+    fn check_canary_rejects_a_different_payload() {
+        let service = CanaryServiceImpl::new(64, 5);
+        let canary_id = Uuid::new_v4();
+
+        assert!(!service.check_canary(&[0u8; 64], canary_id));
     }
 
     #[test]

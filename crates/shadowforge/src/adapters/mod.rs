@@ -4,6 +4,7 @@ pub mod adaptive;
 pub mod analysis;
 pub mod archive;
 pub mod canary;
+pub mod canary_notify;
 pub mod corpus;
 pub mod correction;
 pub mod crypto;
