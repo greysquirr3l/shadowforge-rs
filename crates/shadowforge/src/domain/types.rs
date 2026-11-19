@@ -562,6 +562,20 @@ pub struct CanaryShard {
     pub notify_url: Option<String>,
 }
 
+/// A record that a canary was accessed.
+///
+/// Written when the operator learns of an access by hand — there is no
+/// endpoint to tell, or the access was discovered some other way. It is
+/// the local audit trail of the tripwire.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanaryAccessRecord {
+    /// When the access was recorded.
+    pub accessed_at: DateTime<Utc>,
+    /// Optional note describing how the access was discovered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 // ─── RetrievalManifest ────────────────────────────────────────────────────────
 
 /// Out-of-band metadata describing where and how to retrieve a dead-drop cover.

@@ -12,6 +12,7 @@ use std::path::Path;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::domain::errors::{
     AdaptiveError, AnalysisError, ArchiveError, CanaryError, CorrectionError, CryptoError,
@@ -655,22 +656,71 @@ pub trait CanaryService {
     /// Embed an additional canary shard in `covers` alongside the regular
     /// distribution.
     ///
-    /// Returns the modified covers and the [`CanaryShard`] to be planted in
-    /// a honeypot location.
+    /// `covers` are the already-embedded distribution covers. `canary_cover`
+    /// is a cover of its own, reserved for the canary: the canary is an
+    /// (N+1)th shard, so it must not be planted on top of one of the N real
+    /// shards. Overwriting a real shard would quietly destroy it and reduce
+    /// the distribution's redundancy.
+    ///
+    /// `notify_url` is the endpoint to alert when the canary is used. It is
+    /// carried in the returned [`CanaryShard`] so that whoever holds the
+    /// canary knows where to report, and it is validated as an HTTPS URL
+    /// before it is stored.
+    ///
+    /// Returns the distribution covers, the cover holding the canary, and
+    /// the [`CanaryShard`] to be planted in a honeypot location.
     ///
     /// # Errors
-    /// Returns [`CanaryError::NoCovers`] or [`CanaryError::EmbedFailed`].
+    /// Returns [`CanaryError::NoCovers`] if there are no covers,
+    /// [`CanaryError::EmbedFailed`] if the canary does not fit in its
+    /// cover, or [`CanaryError::InvalidNotifyUrl`] if the notification URL
+    /// is not an HTTPS endpoint.
     fn embed_canary(
         &self,
         covers: Vec<CoverMedia>,
+        canary_cover: CoverMedia,
         embedder: &dyn EmbedTechnique,
-    ) -> Result<(Vec<CoverMedia>, CanaryShard), CanaryError>;
+        notify_url: Option<String>,
+    ) -> Result<(Vec<CoverMedia>, CoverMedia, CanaryShard), CanaryError>;
 
-    /// Return `true` if the `shard`'s notify URL is reachable, indicating
-    /// the canary has been accessed.
+    /// Return `true` if `payload` is the canary for `canary_id`.
     ///
-    /// Non-blocking check; returns `false` on network error.
-    fn check_canary(&self, shard: &CanaryShard) -> bool;
+    /// `payload` is the bytes recovered from a cover — what a party who
+    /// does not know what the canary is would be holding.
+    fn check_canary(&self, payload: &[u8], canary_id: Uuid) -> bool;
+}
+
+/// Delivers a canary tripwire notification.
+///
+/// The canary itself cannot make a network request: the domain layer holds
+/// no I/O, and a shard is inert data by design. The tripwire fires when a
+/// party who has no idea what the canary is picks it up and uses it — which
+/// means the notification is triggered by the *observer*, not by the
+/// canary. This port is how the tooling that observes a canary tells the
+/// operator.
+///
+/// The implementation is responsible for refusing anything but HTTPS.
+pub trait CanaryNotifier {
+    /// Report that `url` has been reached.
+    ///
+    /// # Errors
+    /// Returns [`CanaryError::InvalidNotifyUrl`] if the URL is not an
+    /// acceptable HTTPS endpoint, or [`CanaryError::NotificationFailed`] if
+    /// the endpoint could not be reached.
+    fn notify(&self, url: &str) -> Result<(), CanaryError>;
+
+    /// Return `true` if `url` answers successfully.
+    ///
+    /// This asks the endpoint whether it is live and able to record a hit.
+    /// Whether it has actually *recorded* one is the endpoint's own
+    /// business — no generic HTTP request can answer that. A transport
+    /// failure (no DNS, no TLS, no route) is an error, not a `false`.
+    ///
+    /// # Errors
+    /// Returns [`CanaryError::InvalidNotifyUrl`] if the URL is not an
+    /// acceptable HTTPS endpoint, or [`CanaryError::NotificationFailed`] if
+    /// the endpoint could not be reached.
+    fn was_notified(&self, url: &str) -> Result<bool, CanaryError>;
 }
 
 // ─── Dead Drop ────────────────────────────────────────────────────────────────

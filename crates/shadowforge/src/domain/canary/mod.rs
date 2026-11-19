@@ -61,23 +61,82 @@ pub fn generate_canary_shard(
     }
 }
 
+/// The marker that identifies a canary.
+///
+/// The marker is a SHA-256 of the `canary_id`, repeated to fill the shard.
+/// A shard shorter than the digest holds a prefix of it, so the marker is
+/// compared only over the bytes that are actually present.
+fn canary_marker(canary_id: Uuid) -> [u8; 32] {
+    Sha256::digest(canary_id.as_bytes()).into()
+}
+
+/// The fewest marker bytes that count as an identification.
+///
+/// A payload shorter than this is not reported as the canary. The
+/// comparison is over the bytes the payload actually holds, so a one-byte
+/// payload would match the marker's first byte with probability 1/256 —
+/// a false alarm on the very signal that is supposed to be worth acting
+/// on. Eight bytes puts the chance of a false match at 2⁻⁶⁴.
+const MIN_MARKER_BYTES: usize = 8;
+
+/// Compare `data` against the canary marker for `canary_id`.
+///
+/// The comparison is constant-time over the bytes that `data` actually
+/// holds, so a canary embedded in a shard shorter than the digest is still
+/// recognised. A payload shorter than the marker is compared over its own
+/// length — that is the truncated prefix of the marker, which is what
+/// `generate_canary_shard` wrote.
+///
+/// Returns `false` for a payload too short to identify anything: an empty
+/// payload carries no marker at all, and a very short one would match by
+/// chance rather than by being the canary.
+fn matches_canary_marker(data: &[u8], canary_id: Uuid) -> bool {
+    use subtle::ConstantTimeEq;
+
+    let marker = canary_marker(canary_id);
+    let len = data.len().min(marker.len());
+    if len < MIN_MARKER_BYTES {
+        return false;
+    }
+    let Some(candidate) = data.get(..len) else {
+        return false;
+    };
+    let Some(expected) = marker.get(..len) else {
+        return false;
+    };
+    candidate.ct_eq(expected).into()
+}
+
 /// Check whether a given shard is the canary by verifying its data matches
 /// the SHA-256 marker derived from the `canary_id`.
 ///
 /// This is a constant-time comparison to avoid timing side channels.
 #[must_use]
 pub fn is_canary_shard(shard: &Shard, canary_id: Uuid) -> bool {
-    use subtle::ConstantTimeEq;
+    matches_canary_marker(&shard.data, canary_id)
+}
 
-    let marker = Sha256::digest(canary_id.as_bytes());
-    if shard.data.len() < marker.len() {
-        return false;
-    }
-    // Compare the first 32 bytes of shard data against the marker
-    shard
-        .data
-        .get(..marker.len())
-        .is_some_and(|prefix| prefix.ct_eq(&marker).into())
+/// Check whether a recovered payload is the canary.
+///
+/// This is the check that matters operationally. A party who does not know
+/// what the canary is holds nothing but the bytes recovered from a cover,
+/// so the payload — not the shard — is what gets tested.
+///
+/// The comparison is constant-time, and the payload only has to carry the
+/// identifying prefix of the marker.
+#[must_use]
+pub fn is_canary_payload(payload: &[u8], canary_id: Uuid) -> bool {
+    matches_canary_marker(payload, canary_id)
+}
+
+/// The fewest marker bytes a canary must carry to be identifiable.
+///
+/// A canary in a shard shorter than this cannot be told apart from an
+/// arbitrary payload, so the adapter refuses to plant one rather than
+/// making a tripwire that never fires.
+#[must_use]
+pub const fn min_canary_bytes() -> usize {
+    MIN_MARKER_BYTES
 }
 
 #[cfg(test)]
@@ -158,5 +217,87 @@ mod tests {
 
         assert_ne!(c1.shard.data, c2.shard.data);
         assert_ne!(c1.shard.hmac_tag, c2.shard.hmac_tag);
+    }
+
+    #[test]
+    fn a_shard_shorter_than_the_digest_is_still_detected() {
+        // A shard smaller than the 32-byte digest holds a truncated
+        // marker. Detection has to work over the bytes that are actually
+        // present, or a short canary is never recognised.
+        let canary_id = Uuid::new_v4();
+        for shard_size in [8usize, 12, 16, 31, 32] {
+            let canary = generate_canary_shard(canary_id, shard_size, 5, None);
+            assert_eq!(canary.shard.data.len(), shard_size);
+            assert!(
+                is_canary_shard(&canary.shard, canary_id),
+                "a {shard_size}-byte canary shard should be detected"
+            );
+            assert!(
+                is_canary_payload(&canary.shard.data, canary_id),
+                "a {shard_size}-byte canary payload should be detected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_canary_is_detected_from_the_raw_payload() {
+        // The operational path: a party recovers the bytes from a cover
+        // and those bytes are tested directly.
+        let canary_id = Uuid::new_v4();
+        let canary = generate_canary_shard(canary_id, 12, 5, None);
+
+        assert!(is_canary_payload(&canary.shard.data, canary_id));
+    }
+
+    #[test]
+    fn a_truncated_canary_prefix_is_detected() {
+        // A party who extracted only part of the payload still holds the
+        // identifying prefix.
+        let canary_id = Uuid::new_v4();
+        let canary = generate_canary_shard(canary_id, 64, 5, None);
+
+        let prefix8 = canary.shard.data.get(..8);
+        let prefix32 = canary.shard.data.get(..32);
+        assert!(is_canary_payload(prefix8.unwrap_or_default(), canary_id));
+        assert!(is_canary_payload(prefix32.unwrap_or_default(), canary_id));
+    }
+
+    #[test]
+    fn an_empty_payload_is_not_the_canary() {
+        // An empty payload carries no marker, so it must not be reported
+        // as the canary.
+        let canary_id = Uuid::new_v4();
+
+        assert!(!is_canary_payload(&[], canary_id));
+    }
+
+    #[test]
+    fn a_payload_too_short_to_identify_is_not_the_canary() {
+        // A one-byte payload would match the marker's first byte with
+        // probability 1/256, so it is not treated as an identification.
+        let canary_id = Uuid::new_v4();
+        let canary = generate_canary_shard(canary_id, 64, 5, None);
+
+        let short = canary.shard.data.get(..3);
+        assert!(!is_canary_payload(short.unwrap_or_default(), canary_id));
+    }
+
+    #[test]
+    fn the_marker_prefix_of_a_real_canary_is_identified() {
+        // The cut-off is at eight bytes, so the canary's own prefix is
+        // still recognised at exactly that length.
+        let canary_id = Uuid::new_v4();
+        let canary = generate_canary_shard(canary_id, 64, 5, None);
+
+        let prefix = canary.shard.data.get(..min_canary_bytes());
+        assert!(is_canary_payload(prefix.unwrap_or_default(), canary_id));
+    }
+
+    #[test]
+    fn a_short_payload_that_is_not_the_marker_is_not_the_canary() {
+        let canary_id = Uuid::new_v4();
+
+        assert!(!is_canary_payload(&[0u8; 4], canary_id));
+        assert!(!is_canary_payload(&[0u8; 12], canary_id));
     }
 }

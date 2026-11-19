@@ -456,6 +456,39 @@ pub enum CanaryError {
         #[source]
         source: StegoError,
     },
+    /// The canary's notify URL is unusable.
+    ///
+    /// Only HTTPS is accepted. A canary notification carries the fact that
+    /// a distribution was compromised, so it must not travel in clear text
+    /// or to a URL the operator did not choose.
+    #[error("invalid canary notify URL: {reason}")]
+    InvalidNotifyUrl {
+        /// Why the URL was rejected.
+        reason: String,
+    },
+    /// The notification could not be delivered.
+    #[error("canary notification failed: {reason}")]
+    NotificationFailed {
+        /// Why the notification did not complete.
+        reason: String,
+    },
+    /// The distribution's shards are too short to carry a canary.
+    ///
+    /// A canary is identified by a prefix of its marker, so a shard
+    /// shorter than that prefix cannot be told apart from an arbitrary
+    /// payload. Planting one anyway would make a tripwire that never
+    /// fires. The shards are as long as the payload divided by the data
+    /// shard count, so a longer payload or fewer data shards fixes it.
+    #[error(
+        "canary shard is too small: {shard_size} bytes, needs at least {minimum} \
+         — the payload is too short for this many data shards"
+    )]
+    ShardTooSmall {
+        /// The size of a shard in the distribution.
+        shard_size: usize,
+        /// The fewest bytes a canary needs.
+        minimum: usize,
+    },
 }
 
 // ─── DeadDropError ────────────────────────────────────────────────────────────
