@@ -56,6 +56,7 @@ pub fn dispatch(cli: Cli) -> Result<(), AppError> {
         Commands::DeadDrop(args) => cmd_dead_drop(&args),
         Commands::TimeLock(args) => cmd_time_lock(&args),
         Commands::Watermark(args) => cmd_watermark(&args),
+        Commands::Canary(args) => cmd_canary(&args),
         Commands::Corpus(args) => cmd_corpus(&args),
         Commands::Panic(args) => cmd_panic(&args),
         Commands::Completions(args) => cmd_completions(&args),
@@ -324,7 +325,7 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
         .iter()
         .map(|path| load_cover_from_path(path, technique))
         .collect();
-    let covers = covers?;
+    let mut covers = covers?;
 
     let profile = resolve_profile(args.profile, args.platform);
 
@@ -337,22 +338,23 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
         });
     }
 
-    let (mut stego_covers, generated_hmac_key) =
-        distribute_covers(args, &payload, covers, &profile, embedder.as_ref())?;
+    let canary_cover = reserve_canary_cover(args, &mut covers)?;
 
-    // Embed canary shard if requested
-    let canary_metadata = if args.canary {
-        let canary_impl = crate::adapters::canary::CanaryServiceImpl::new(64, 5);
-        let (covers_with_canary, shard) =
-            crate::application::services::CanaryShardService::embed_canary(
-                stego_covers,
-                embedder.as_ref(),
-                &canary_impl,
-            )?;
-        stego_covers = covers_with_canary;
-        Some(shard)
-    } else {
-        None
+    let distribution = distribute_covers(args, &payload, covers, &profile, embedder.as_ref())?;
+    let mut stego_covers = distribution.stego_covers;
+
+    // Embed canary shard if requested. Its size and total come from the
+    // distribution that was just made, so the canary is indistinguishable
+    // in shape from the shards it sits beside.
+    let canary_metadata = match canary_cover {
+        Some(canary_cover) => Some(plant_canary(
+            args,
+            canary_cover,
+            &mut stego_covers,
+            &distribution.geometry,
+            embedder.as_ref(),
+        )?),
+        None => None,
     };
 
     let files: Vec<(String, Vec<u8>)> = stego_covers
@@ -378,7 +380,7 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     fs_write(&args.output_archive, &archive)?;
 
     // Persist HMAC key so extract-distributed can use it
-    if let Some(hmac_key) = generated_hmac_key {
+    if let Some(hmac_key) = distribution.hmac_key {
         let key_path = args.output_archive.with_extension("hmac");
         fs_write(&key_path, &hmac_key)?;
         eprintln!("HMAC key written to {}", key_path.display());
@@ -405,15 +407,126 @@ fn cmd_embed_distributed(args: &cli::EmbedDistributedArgs) -> Result<(), AppErro
     Ok(())
 }
 
+/// Reserve the cover that will carry the canary shard.
+///
+/// The canary is an (N+1)th shard, so it needs a cover of its own. It is
+/// reserved before the distribution is made, because planting it on top of
+/// a real shard would destroy that shard and quietly reduce the
+/// distribution's redundancy.
+///
+/// Reserving the canary cover must not leave the distribution short of the
+/// covers it needs, so the count is checked here rather than surfacing as
+/// an opaque shortage further down.
+fn reserve_canary_cover(
+    args: &cli::EmbedDistributedArgs,
+    covers: &mut Vec<CoverMedia>,
+) -> Result<Option<CoverMedia>, AppError> {
+    if !args.canary {
+        return Ok(None);
+    }
+
+    if covers.is_empty() {
+        return Err(AppError::Cli {
+            reason: "--canary needs at least one cover to plant the canary in".into(),
+        });
+    }
+
+    let needed = if args.geo_manifest.is_some() {
+        let manifest =
+            load_geographic_manifest(args.geo_manifest.as_ref().ok_or_else(|| AppError::Cli {
+                reason: "--geo-manifest is required for a geographic distribution".into(),
+            })?)?;
+        manifest.shards.len()
+    } else {
+        usize::from(args.data_shards).strict_add(usize::from(args.parity_shards))
+    };
+
+    if covers.len() < needed.strict_add(1) {
+        return Err(AppError::Cli {
+            reason: format!(
+                "--canary needs a cover of its own, so this distribution needs {} \
+                 covers in total: {} for the shards and 1 for the canary, but {} were given",
+                needed.strict_add(1),
+                needed,
+                covers.len()
+            ),
+        });
+    }
+
+    Ok(covers.pop())
+}
+
+/// The shard geometry of a distribution.
+///
+/// The canary shard has to be the same size as the shards it sits beside
+/// and has to claim the same total, so the geometry is taken from the
+/// distribution that was actually made rather than assumed.
+#[derive(Debug, Clone, Copy)]
+struct ShardGeometry {
+    /// Size in bytes of each shard.
+    shard_size: usize,
+    /// Number of shards in the distribution (data + parity).
+    total_shards: u8,
+}
+
+/// The outcome of distributing a payload across covers.
+struct Distribution {
+    /// The stego covers holding the shards.
+    stego_covers: Vec<CoverMedia>,
+    /// The generated HMAC key, if one was made rather than supplied.
+    hmac_key: Option<Vec<u8>>,
+    /// The geometry the shards were produced with.
+    geometry: ShardGeometry,
+}
+
+/// Plant the canary shard in its own cover and write that cover out.
+///
+/// The canary cover is written separately, not into the archive. It is
+/// planted in a honeypot location; shipping it alongside the real shards
+/// would defeat the point. The extension is kept so the file can be
+/// loaded back by `extract`.
+fn plant_canary(
+    args: &cli::EmbedDistributedArgs,
+    canary_cover: CoverMedia,
+    stego_covers: &mut Vec<CoverMedia>,
+    geometry: &ShardGeometry,
+    embedder: &dyn EmbedTechnique,
+) -> Result<crate::domain::types::CanaryShard, AppError> {
+    let canary_impl =
+        crate::adapters::canary::CanaryServiceImpl::new(geometry.shard_size, geometry.total_shards);
+    let (covers_with_canary, stego_canary_cover, shard) =
+        crate::application::services::CanaryShardService::embed_canary(
+            std::mem::take(stego_covers),
+            canary_cover,
+            embedder,
+            &canary_impl,
+            args.canary_notify_url.clone(),
+        )?;
+    *stego_covers = covers_with_canary;
+
+    let canary_cover_path = args.output_archive.with_extension(format!(
+        "canary-cover.{}",
+        cover_file_extension(stego_canary_cover.kind)
+    ));
+    save_cover_to_path(&stego_canary_cover, &canary_cover_path)?;
+    eprintln!(
+        "Canary cover written to {} — plant this in the honeypot location",
+        canary_cover_path.display()
+    );
+
+    Ok(shard)
+}
+
 fn distribute_covers(
     args: &cli::EmbedDistributedArgs,
     payload: &Payload,
     covers: Vec<CoverMedia>,
     profile: &crate::domain::types::EmbeddingProfile,
     embedder: &dyn EmbedTechnique,
-) -> Result<(Vec<CoverMedia>, Option<Vec<u8>>), AppError> {
+) -> Result<Distribution, AppError> {
     if let Some(manifest_path) = &args.geo_manifest {
         let manifest = load_geographic_manifest(manifest_path)?;
+        let shard_count = manifest.shards.len();
         let geo_distributor = crate::adapters::opsec::GeographicDistributorImpl::new();
         let stego_covers =
             crate::application::services::DistributeService::distribute_with_geographic_manifest(
@@ -423,7 +536,20 @@ fn distribute_covers(
                 embedder,
                 &geo_distributor,
             )?;
-        return Ok((stego_covers, None));
+        // The geographic distributor splits the payload into equal chunks
+        // rather than into Reed-Solomon shards, so the canary matches that.
+        let chunk_size = payload.as_bytes().len().div_ceil(shard_count);
+        let geometry = ShardGeometry {
+            shard_size: chunk_size,
+            total_shards: u8::try_from(shard_count).map_err(|_| AppError::Cli {
+                reason: format!("a distribution cannot have {shard_count} shards"),
+            })?,
+        };
+        return Ok(Distribution {
+            stego_covers,
+            hmac_key: None,
+            geometry,
+        });
     }
 
     let hmac_key = if let Some(p) = &args.hmac_key {
@@ -460,7 +586,22 @@ fn distribute_covers(
                 compressor: &compressor,
             },
         )?;
-    Ok((stego_covers, generated_hmac_key))
+
+    // The Reed-Solomon shard geometry, taken from the same arithmetic the
+    // encoder uses so the canary cannot disagree with the real shards.
+    let total_shards = args.data_shards.strict_add(args.parity_shards);
+    let shard_size =
+        crate::domain::correction::shard_size_for(payload.as_bytes().len(), args.data_shards);
+    let geometry = ShardGeometry {
+        shard_size,
+        total_shards,
+    };
+
+    Ok(Distribution {
+        stego_covers,
+        hmac_key: generated_hmac_key,
+        geometry,
+    })
 }
 
 fn load_geographic_manifest(
@@ -806,6 +947,136 @@ fn cmd_watermark(args: &cli::WatermarkArgs) -> Result<(), AppError> {
             }
         }
     }
+    Ok(())
+}
+
+// ─── Canary ───────────────────────────────────────────────────────────────────
+
+fn cmd_canary(args: &cli::CanaryArgs) -> Result<(), AppError> {
+    match &args.subcmd {
+        cli::CanarySubcommand::Check {
+            canary,
+            payload,
+            offline,
+        } => {
+            let shard = load_canary_shard(canary)?;
+            let payload_bytes = fs_read(payload)?;
+            let service = crate::adapters::canary::CanaryServiceImpl::new(
+                shard.shard.data.len(),
+                shard.shard.total,
+            );
+
+            let is_canary = crate::application::services::CanaryShardService::check_canary(
+                &payload_bytes,
+                shard.canary_id,
+                &service,
+            );
+
+            if !is_canary {
+                println!("Not the canary. This payload is not the tripwire.");
+                return Ok(());
+            }
+
+            println!("This payload IS the canary. The distribution was compromised.");
+
+            if *offline {
+                println!("--offline: the notification endpoint was not contacted.");
+                return Ok(());
+            }
+
+            let Some(url) = shard.notify_url.as_deref() else {
+                return Err(AppError::Canary(CanaryError::NotificationFailed {
+                    reason: "this canary has no notification endpoint, so the tripwire \
+                             cannot report; use `canary mark-accessed` to record it by hand"
+                        .into(),
+                }));
+            };
+
+            let notifier = crate::adapters::canary_notify::HttpsCanaryNotifier::new();
+            crate::application::services::CanaryShardService::fire_tripwire(
+                &payload_bytes,
+                &shard,
+                &service,
+                &notifier,
+            )?;
+            println!("Notification sent to {url}.");
+        }
+        cli::CanarySubcommand::Status { canary } => {
+            let shard = load_canary_shard(canary)?;
+            if shard.notify_url.is_none() {
+                return Err(AppError::Canary(CanaryError::NotificationFailed {
+                    reason: "this canary has no notification endpoint, so it cannot be \
+                             checked remotely"
+                        .into(),
+                }));
+            }
+            let notifier = crate::adapters::canary_notify::HttpsCanaryNotifier::new();
+            let reached = crate::application::services::CanaryShardService::tripwire_armed(
+                &shard, &notifier,
+            )?;
+            if reached {
+                println!("The canary endpoint answered. The tripwire has fired.");
+            } else {
+                println!("The canary endpoint did not answer. The tripwire has not fired.");
+            }
+            println!("Whether the endpoint recorded a hit is the endpoint's own record.");
+        }
+        cli::CanarySubcommand::MarkAccessed { canary, note } => {
+            let shard = load_canary_shard(canary)?;
+            let record = crate::domain::types::CanaryAccessRecord {
+                accessed_at: chrono::Utc::now(),
+                note: note.clone(),
+            };
+            let path = canary_access_log_path(canary);
+            append_canary_access(&path, &record)?;
+            println!(
+                "Recorded access to canary {} at {}",
+                shard.canary_id, record.accessed_at
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Load the canary metadata written by `embed-distributed --canary`.
+fn load_canary_shard(path: &Path) -> Result<crate::domain::types::CanaryShard, AppError> {
+    let raw = fs_read(path)?;
+    serde_json::from_slice(&raw).map_err(|e| {
+        AppError::Canary(CanaryError::NotificationFailed {
+            reason: format!("{} is not a canary metadata file: {e}", path.display()),
+        })
+    })
+}
+
+/// Where the manual access log lives for a given canary metadata file.
+fn canary_access_log_path(canary_path: &Path) -> PathBuf {
+    canary_path.with_extension("accessed")
+}
+
+/// Append a record to the canary access log.
+///
+/// The log is append-only and newline-delimited, so a record cannot
+/// silently replace an earlier one.
+fn append_canary_access(
+    path: &Path,
+    record: &crate::domain::types::CanaryAccessRecord,
+) -> Result<(), AppError> {
+    use std::io::Write;
+
+    let line = serde_json::to_string(record).map_err(|e| AppError::Cli {
+        reason: format!("failed to serialise the access record: {e}"),
+    })?;
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| AppError::Cli {
+            reason: format!("failed to open {}: {e}", path.display()),
+        })?;
+    writeln!(file, "{line}").map_err(|e| AppError::Cli {
+        reason: format!("failed to write {}: {e}", path.display()),
+    })?;
     Ok(())
 }
 

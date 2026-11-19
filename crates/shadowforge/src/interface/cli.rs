@@ -64,6 +64,9 @@ pub enum Commands {
     /// Forensic watermark operations.
     Watermark(WatermarkArgs),
 
+    /// Canary tripwire operations.
+    Canary(CanaryArgs),
+
     /// Corpus index operations.
     Corpus(CorpusArgs),
 
@@ -292,6 +295,12 @@ pub struct EmbedDistributedArgs {
     /// Inject a canary shard.
     #[arg(long)]
     pub canary: bool,
+    /// HTTPS endpoint to notify when the canary is accessed.
+    ///
+    /// Only https:// URLs are accepted. Without this the canary can still
+    /// be planted and identified, but the tripwire has nowhere to report.
+    #[arg(long)]
+    pub canary_notify_url: Option<String>,
     /// Geographic manifest TOML path.
     #[arg(long)]
     pub geo_manifest: Option<PathBuf>,
@@ -449,6 +458,61 @@ pub enum TimeLockSubcommand {
         /// Puzzle file.
         #[arg(long)]
         puzzle: PathBuf,
+    },
+}
+
+/// Arguments for `canary`.
+#[derive(Parser, Debug)]
+pub struct CanaryArgs {
+    /// Canary sub-operation.
+    #[command(subcommand)]
+    pub subcmd: CanarySubcommand,
+}
+
+/// Canary sub-operations.
+#[derive(Subcommand, Debug)]
+pub enum CanarySubcommand {
+    /// Report whether a recovered payload is the canary.
+    ///
+    /// Reads the canary metadata written by `embed-distributed --canary`
+    /// and tests the payload against it. If the payload is the canary, the
+    /// notification endpoint is alerted.
+    #[command(name = "check")]
+    Check {
+        /// Canary metadata file (the `.canary` file).
+        #[arg(long)]
+        canary: PathBuf,
+        /// Path to the payload recovered from a cover.
+        #[arg(long)]
+        payload: PathBuf,
+        /// Do not contact the notification endpoint.
+        ///
+        /// The payload is still identified; only the alert is withheld.
+        #[arg(long)]
+        offline: bool,
+    },
+    /// Ask whether the canary's endpoint has already been reached.
+    ///
+    /// This is the operator's side of the tripwire: it reports whether the
+    /// alert has already gone out, without needing the canary payload.
+    #[command(name = "status")]
+    Status {
+        /// Canary metadata file (the `.canary` file).
+        #[arg(long)]
+        canary: PathBuf,
+    },
+    /// Record that the canary was accessed, by hand.
+    ///
+    /// For the case where there is no notification endpoint, or where the
+    /// operator learned of the access some other way.
+    #[command(name = "mark-accessed")]
+    MarkAccessed {
+        /// Canary metadata file (the `.canary` file).
+        #[arg(long)]
+        canary: PathBuf,
+        /// Optional note describing how the access was discovered.
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
