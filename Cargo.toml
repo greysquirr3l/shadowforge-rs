@@ -28,13 +28,42 @@ missing_docs = "warn"
 unused_must_use = "deny"
 
 [workspace.lints.clippy]
-pedantic = { level = "warn", priority = -1 }
+# The lint policy lives here rather than in a command line, so that it
+# applies to every `cargo clippy` — CI, a contributor's clone, and the
+# editor — instead of only to whoever remembers to pass the flags.
+#
+# Cargo applies a group before a lint of the same name only if their
+# priorities differ, so the groups sit at priority -1 and the individual
+# lints at the default 0. Within a priority Cargo sorts alphabetically,
+# so the groups are ordered `all` first and `suspicious` last: rustc
+# takes the last flag for a lint, which is what lets the `deny` on
+# `suspicious` override the `warn` that `all` implies for it.
+all = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-expect_used = "deny"
-unwrap_used = "deny"
-indexing_slicing = "deny"
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+# Allowed even though the groups above would warn them. These are noisy
+# without being wrong: the crate is one module per bounded context, a
+# public API that returns a result does not need a doc comment on every
+# error variant, and the workspace depends on several versions of some
+# crates.
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 multiple_crate_versions = "allow"
+struct_excessive_bools = "allow"
+
+# Denied. A panic in production code is a crash the caller cannot handle;
+# an `unwrap` on a value that failed is the same crash wearing a disguise.
+# `panic` is denied in tests too — a panic aborts the whole test binary
+# and discards the value that did not match, so a test reports the
+# mismatch instead.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+cast_ptr_alignment = "deny"

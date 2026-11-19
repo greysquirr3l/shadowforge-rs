@@ -58,7 +58,12 @@ jobs:
         run: cargo build --workspace --all-features
 
       - name: Clippy
-        run: cargo clippy --workspace --all-features -- -D warnings
+        # --all-targets matters: without it the tests are not linted, so a
+        # panic or an unwrap in a test reaches the default branch unchecked.
+        # The lint set itself comes from the workspace's [lints.clippy] table
+        # in Cargo.toml, so it applies here and in a contributor's clone
+        # alike.
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --workspace --all-features
