@@ -68,3 +68,8 @@ PROGRESS.md
 rust-catchup-1.78-1.94.1.md
 tasks/
 CLAUDE.md
+
+# The canary endpoint contract. Kept locally, not published — it documents the
+# tripwire's detection surface in enough detail to help someone build a
+# compatible listener.
+CANARY_ENDPOINT.md
